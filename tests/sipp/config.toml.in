@@ -1,0 +1,57 @@
+# SIPp harness config: @REPO@, @WORK@, @SPOOL@ and @DATA@ are filled in by run_harness.sh.
+# Fictional values only; the trunk is loopback so the harness can reach it and 127.0.0.2 cannot.
+[company]
+name = "Example Company"
+privacy_url_default = "example.com/privacy"
+
+[trunk]
+provider = "harness"
+signalling_ranges = ["127.0.0.1/32"]
+bind = "127.0.0.1:15060"
+media_address = "127.0.0.1"
+allow_local_test = false
+
+[[line]]
+id = "be"
+did = "3220000001"
+mailbox = "info@example.com"
+email_language = "en"
+menu = ["nl", "fr", "en"]
+
+[[line]]
+id = "pl"
+did = "48320000001"
+mailbox = "kontakt@example.com"
+email_language = "pl"
+menu = ["pl"]
+
+[stt]
+chain = ["whisper_local"]
+
+[llm]
+chain = ["none"]
+none = { base_url = "http://127.0.0.1:9/v1", model = "none" }
+
+[mail]
+smtp_host = "127.0.0.1"
+smtp_port = 25
+smtp_security = "none"
+from = "voicemail@example.com"
+from_name = "Harness Voicemail"
+alert_to = "admin@example.com"
+
+[tts]
+engine = "placeholder"
+
+[retention]
+call_log_days = 90
+cdr = true
+
+[spool]
+path = "@SPOOL@"
+
+[paths]
+data_dir = "@DATA@"
+work_dir = "@WORK@/run"
+prompts_dir = "@REPO@/prompts"
+generated_dir = "@WORK@/generated"
