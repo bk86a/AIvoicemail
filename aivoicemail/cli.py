@@ -109,7 +109,25 @@ def _add_generate(sub) -> None:
     p.set_defaults(func=cmd_generate)
 
 
-COMMANDS = [_add_worker, _add_render_prompts, _add_check, _add_generate]
+def cmd_test_call(args) -> int:
+    from .testcall import run
+    cfg, _, _ = load_all(args)
+    return run(cfg, line_id=args.line, digit=args.digit, target=args.target, wav=args.wav,
+               fake_providers=args.fake_providers, timeout=args.timeout)
+
+
+def _add_test_call(sub) -> None:
+    p = sub.add_parser("test-call", help="place a local SIPp call and wait for the worker to deliver it")
+    p.add_argument("--line", help="line id (default: the first line)")
+    p.add_argument("--digit", help="menu key to press (default: 1 on menu lines)")
+    p.add_argument("--target", help="SIP host:port (default: 127.0.0.1 and the [trunk].bind port)")
+    p.add_argument("--wav", help="8 kHz mono 16-bit speech to send after the beep (up to 20 s)")
+    p.add_argument("--fake-providers", action="store_true", help="also require the email in the fake-provider outbox")
+    p.add_argument("--timeout", type=int, default=300, help="seconds to wait for the worker (default 300)")
+    p.set_defaults(func=cmd_test_call)
+
+
+COMMANDS = [_add_worker, _add_render_prompts, _add_check, _add_generate, _add_test_call]
 
 
 def build_parser() -> argparse.ArgumentParser:
