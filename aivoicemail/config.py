@@ -18,6 +18,12 @@ LINE_ID_RE = re.compile(r"[a-z][a-z0-9]{0,15}")
 LANG_RE = re.compile(r"[a-z]{2}")
 DID_RE = re.compile(r"[0-9]{6,15}")
 ENV_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
+# Charset allow-list for any IP/CIDR value, checked before handing the string to `ipaddress`.
+# `ipaddress` accepts IPv6 scope ids ("fe80::1%eth0") with very little restriction on the scope
+# text (including newlines and brackets), which would otherwise let a config value inject
+# arbitrary lines into the generated Asterisk/nftables files. No '%' is allowed here, so scope
+# ids are rejected outright rather than sanitised.
+IP_CHARS_RE = re.compile(r"[0-9A-Fa-f.:/]+")
 LOCAL_STT = "whisper_local"
 STRUCTURED = ("json_schema", "json_object", "none")
 AUTH = ("bearer", "api-key")
@@ -256,6 +262,9 @@ class _Reader:
         return value
 
     def cidr(self, value: str, where: str) -> None:
+        if not IP_CHARS_RE.fullmatch(value):
+            self.err(f"{where}: {value!r} is not a valid CIDR (invalid characters)")
+            return
         try:
             ipaddress.ip_network(value, strict=True)
         except ValueError as e:
@@ -263,6 +272,9 @@ class _Reader:
 
     def ip(self, value: str | None, where: str) -> str | None:
         if value:
+            if not IP_CHARS_RE.fullmatch(value):
+                self.err(f"{where}: {value!r} is not an IP address (invalid characters)")
+                return value
             try:
                 ipaddress.ip_address(value)
             except ValueError:
@@ -275,6 +287,19 @@ class _Reader:
             self.err(f"{where}.{key}: must be positive")
             return default
         return value
+
+
+def _split_bind(bind: str) -> tuple[str | None, str]:
+    """Split "host:port" or the bracketed IPv6 form "[host]:port" into (host, port)."""
+    if bind.startswith("["):
+        end = bind.find("]")
+        if end == -1 or bind[end + 1:end + 2] != ":":
+            return None, ""
+        return bind[1:end], bind[end + 2:]
+    host, sep, port = bind.rpartition(":")
+    if not sep:
+        return None, ""
+    return host, port
 
 
 def _path(root: Path, value: str | Path) -> Path:
@@ -301,9 +326,9 @@ def _trunk(r: _Reader, t: dict) -> Trunk:
     if local_net:
         r.cidr(local_net, f"{w}.local_net")
     bind = r.get(t, "bind", w, str, "0.0.0.0:5060")
-    host, sep, port = bind.rpartition(":")
-    if not sep or not port.isdigit() or not 0 < int(port) < 65536:
-        r.err(f"{w}.bind: {bind!r} must be host:port")
+    host, port = _split_bind(bind)
+    if host is None or not port.isascii() or not port.isdigit() or not 0 < int(port) < 65536:
+        r.err(f"{w}.bind: {bind!r} must be host:port or [ipv6-host]:port")
         bind = "0.0.0.0:5060"
     else:
         r.ip(host, f"{w}.bind")

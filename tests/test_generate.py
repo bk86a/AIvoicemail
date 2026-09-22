@@ -46,6 +46,47 @@ def test_media_address_option(example_cfg):
     assert "media_address = 10.0.0.5\nbind_rtp_to_media_address = yes\n" in generate.pjsip_trunk(cfg)
 
 
+def test_bind_ipv6_bracketed_round_trips(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(example_cfg.trunk, bind="[2001:db8::1]:5070"))
+    assert "bind = [2001:db8::1]:5070\n" in generate.pjsip_trunk(cfg)
+
+
+@pytest.mark.parametrize("bad_trunk", [
+    dict(public_ip="203.0.113.10%evil"),
+    dict(media_address="10.0.0.5;evil"),
+    dict(local_net="10.0.0.0/24 evil"),
+    dict(signalling_ranges=("46.19.208.0%evil/21",)),
+    dict(bind="0.0.0.0}evil:5060"),
+])
+def test_pjsip_trunk_rejects_invalid_characters(example_cfg, bad_trunk):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(example_cfg.trunk, **bad_trunk))
+    with pytest.raises(ValueError):
+        generate.pjsip_trunk(cfg)
+
+
+def test_extensions_lines_rejects_invalid_line_id(example_cfg):
+    be, pl = example_cfg.lines
+    bad = dataclasses.replace(be, id="be;evil")
+    cfg = dataclasses.replace(example_cfg, lines=(bad, pl))
+    with pytest.raises(ValueError):
+        generate.extensions_lines(cfg)
+
+
+def test_extensions_lines_rejects_invalid_did(example_cfg):
+    be, pl = example_cfg.lines
+    bad = dataclasses.replace(be, did="322000}evil")
+    cfg = dataclasses.replace(example_cfg, lines=(bad, pl))
+    with pytest.raises(ValueError):
+        generate.extensions_lines(cfg)
+
+
+def test_nftables_rejects_invalid_cidr(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(
+        example_cfg.trunk, signalling_ranges=("46.19.208.0%evil/21",)))
+    with pytest.raises(ValueError):
+        generate.nftables(cfg)
+
+
 def test_write_all(example_cfg, tmp_path):
     paths = generate.write_all(example_cfg, tmp_path)
     assert (tmp_path / "asterisk" / "pjsip-trunk.conf") in paths

@@ -76,6 +76,52 @@ def test_invalid_values(tmp_path, old, new, needle):
     assert any(needle in p for p in problems_for(tmp_path, old, new)), needle
 
 
+IP_CIDR_BAD_CHARS = [
+    pytest.param("%evil", id="percent"),
+    pytest.param(" evil", id="space"),
+    pytest.param("\\nevil", id="newline"),
+    pytest.param("}evil", id="brace"),
+    pytest.param(";evil", id="semicolon"),
+]
+
+IP_CIDR_FIELDS = [
+    pytest.param('public_ip = "203.0.113.10"', 'public_ip = "203.0.113.10{frag}"', id="public_ip"),
+    pytest.param('local_net = "10.0.0.0/24"     # optional', 'local_net = "10.0.0.0/24{frag}"     # optional',
+                 id="local_net"),
+    pytest.param('"46.19.208.0/21", "185.238.172.0/22"]\nmedia',
+                 '"46.19.208.0{frag}/21", "185.238.172.0/22"]\nmedia', id="signalling_ranges"),
+    pytest.param('# media_address = ""          # optional: bind RTP to this local address',
+                 'media_address = "203.0.113.10{frag}"', id="media_address"),
+    pytest.param('# bind = "0.0.0.0:5060"       # SIP UDP listen address', 'bind = "0.0.0.0{frag}:5060"',
+                 id="bind_host"),
+]
+
+
+@pytest.mark.parametrize("frag", IP_CIDR_BAD_CHARS)
+@pytest.mark.parametrize("old,new_tmpl", IP_CIDR_FIELDS)
+def test_ip_cidr_fields_reject_bad_characters(tmp_path, old, new_tmpl, frag):
+    problems = problems_for(tmp_path, old, new_tmpl.format(frag=frag))
+    assert problems
+
+
+def test_public_ip_rejects_ipv6_scope_id(tmp_path):
+    problems = problems_for(tmp_path, 'public_ip = "203.0.113.10"', 'public_ip = "fe80::1%eth0"')
+    assert any("public_ip" in p for p in problems)
+
+
+def test_bind_rejects_non_ascii_port_digits(tmp_path):
+    problems = problems_for(tmp_path, '# bind = "0.0.0.0:5060"       # SIP UDP listen address',
+                            'bind = "0.0.0.0:٥٠٦٠"')
+    assert any("bind" in p for p in problems)
+
+
+def test_bind_accepts_bracketed_ipv6(tmp_path):
+    c = load_text(tmp_path, TEXT.replace('# bind = "0.0.0.0:5060"       # SIP UDP listen address',
+                                         'bind = "[2001:db8::1]:5070"', 1))
+    assert c.trunk.bind == "[2001:db8::1]:5070"
+    assert c.trunk.sip_port == 5070
+
+
 def test_unknown_top_level_key(tmp_path):
     assert any("unknown key 'typo'" in p for p in problems_for(tmp_path, None, "\n[typo]\nx = 1\n", append=True))
 
