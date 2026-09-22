@@ -51,9 +51,9 @@ class Processor:
 
     def process(self, item) -> str:
         if item.id in self.sent_pending_ack:
-            return self._ack(item.id, retry=True)
+            return self._retry_saved(item.id, lambda: self._ack(item.id, retry=True))
         if item.id in self.pending_send:
-            return self._deliver(item.id, self.pending_send[item.id])
+            return self._retry_saved(item.id, lambda: self._deliver(item.id, self.pending_send[item.id]))
         work = Path(self.d.cfg.paths.work_dir) / item.id
         meta = wav = None
         try:
@@ -65,14 +65,42 @@ class Processor:
             self.d.log(f"{item.id}: spool error: {e}")
             return "retry"
         except Exception as e:
-            count = self.failures[item.id] = self.failures.get(item.id, 0) + 1
-            limit = self.d.cfg.worker.max_failures
-            self.d.log(f"{item.id}: processing failed ({type(e).__name__}), attempt {count}/{limit}")
-            if count < limit:
+            count = self._bump_failures(item.id, e)
+            if count < self.d.cfg.worker.max_failures:
                 return "retry"
             return self._give_up(item.id, meta, wav)
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    def _bump_failures(self, item_id, exc) -> int:
+        count = self.failures[item_id] = self.failures.get(item_id, 0) + 1
+        self.d.log(f"{item_id}: processing failed ({type(exc).__name__}), attempt {count}/{self.d.cfg.worker.max_failures}")
+        return count
+
+    def _retry_saved(self, item_id, fn) -> str:
+        """Re-run a cached ack-only or send-only retry under the same failure accounting as a fresh
+        attempt, so an unexpected (non-SpoolError/SendError) exception from it can't retry forever
+        without ever reaching the give-up threshold."""
+        try:
+            result = fn()
+        except SpoolError as e:
+            self.d.log(f"{item_id}: spool error: {e}")
+            return "retry"
+        except Exception as e:
+            pending = self.pending_send.get(item_id)
+            if pending is not None:
+                meta, attachments = pending.meta, pending.attachments
+            else:
+                saved = self.sent_pending_ack.get(item_id)
+                meta, attachments = (saved[0] if saved is not None else {"id": item_id}), ()
+            count = self._bump_failures(item_id, e)
+            if count < self.d.cfg.worker.max_failures:
+                return "retry"
+            self.pending_send.pop(item_id, None)
+            self.sent_pending_ack.pop(item_id, None)
+            return self._give_up(item_id, meta, None, attachments=attachments)
+        self.failures.pop(item_id, None)
+        return result
 
     def _pipeline(self, item_id, meta, wav) -> str:
         line = self.d.cfg.line(meta.get("line"))
@@ -122,14 +150,24 @@ class Processor:
             return "retry"
         self.pending_send.pop(item_id, None)
         self._log_call(pending.meta, pending.outcome, providers=pending.providers, message_id=message_id)
+        self.sent_pending_ack[item_id] = (pending.meta, message_id)
         if item_id in self.giveup_alert_pending:
             self.giveup_alert_pending.discard(item_id)
+            self._alert_giveup(item_id)
+        return self._ack(item_id)
+
+    def _alert_giveup(self, item_id) -> None:
+        """Best-effort operator alert. The ack above has already been recorded in
+        sent_pending_ack, so a missing alerter or an alert failure here must never block it."""
+        if self.d.alerter is None:
+            return
+        try:
             self.d.alerter.notify(
                 "processing failed",
                 f"Item {item_id} failed processing {self.d.cfg.worker.max_failures} times in a row; it was sent "
                 "to the mailbox as a fallback email and removed from the spool.", self.d.clock())
-        self.sent_pending_ack[item_id] = (pending.meta, message_id)
-        return self._ack(item_id)
+        except Exception as e:
+            self.d.log(f"{item_id}: give-up alert failed: {type(e).__name__}: {e}")
 
     def _ack(self, item_id, *, retry=False) -> str:
         try:
@@ -142,18 +180,35 @@ class Processor:
             self._log_call(meta, "acked-after-retry", message_id=message_id)
         return "acked"
 
-    def _give_up(self, item_id, meta, wav) -> str:
-        """Poison item: send what we have to the item's line mailbox (else the first line), alert, then ack."""
+    def _give_up(self, item_id, meta, wav, *, attachments=None) -> str:
+        """Poison item: send what we have to the item's line mailbox (else the first line), alert, then ack.
+
+        `attachments`, when given (e.g. by _retry_saved, resuming a previously-rendered Pending),
+        is used as-is instead of re-derived from `wav` - the pipeline already materialised it and
+        the on-disk work directory may be long gone. Otherwise it is built from `wav`, falling back
+        to the item's own work directory in case a wav was already fetched there before the error
+        that triggered give-up (e.g. get() failed after downloading audio but before parsing meta)."""
         meta = meta if isinstance(meta, dict) else {}
         line = self.d.cfg.line(meta.get("line")) or self.d.cfg.lines[0]
         safe = {"id": item_id}
         for key in ("line", "did", "caller", "started_at", "duration_s"):
             safe[key] = " ".join(str(meta.get(key, "?")).split())[:64] or "?"
-        attachment = ()
-        if wav is not None and Path(wav).is_file():
-            attachment = ((Path(wav).name, Path(wav).read_bytes(), "audio/wav"),)
+        if attachments is None:
+            if wav is None:
+                candidate = Path(self.d.cfg.paths.work_dir) / item_id / f"{item_id}.wav"
+                wav = candidate if candidate.is_file() else None
+            attachments = ((Path(wav).name, Path(wav).read_bytes(), "audio/wav"),) \
+                if wav is not None and Path(wav).is_file() else ()
+        self.pending_send.pop(item_id, None)
         self.giveup_alert_pending.add(item_id)
         self.failures.pop(item_id, None)
-        return self._deliver(item_id, Pending(safe, "fallback-failed-repeatedly", line.mailbox,
-                                              render.fallback(line, safe, None, "processing failed repeatedly"),
-                                              attachment))
+        pending = Pending(safe, "fallback-failed-repeatedly", line.mailbox,
+                          render.fallback(line, safe, None, "processing failed repeatedly"), attachments)
+        try:
+            return self._deliver(item_id, pending)
+        except Exception as e:
+            # Safety net only: _deliver already handles SendError itself. Anything else escaping
+            # it here (e.g. the fallback send raising a non-SendError error too) must not crash
+            # process() - leave it to be retried like any other pending send.
+            self.d.log(f"{item_id}: give-up delivery failed unexpectedly, will retry: {type(e).__name__}: {e}")
+            return "retry"

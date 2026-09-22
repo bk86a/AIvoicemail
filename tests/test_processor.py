@@ -341,3 +341,72 @@ def test_send_retry_keeps_wav_attachment(cfg):
     p.d.send = lambda **kw: (sends.append(kw), "MID")[1]
     assert p.process(Item(ID, 0, True)) == "acked"
     assert sends[0]["attachments"] == ((f"{ID}.wav", b"RIFFdata", "audio/wav"),)
+
+
+def test_giveup_without_alerter_still_acks_with_one_fallback_email(cfg):
+    sends = []
+    p = make(cfg, FakeSpool(meta(line="xx")), sends)
+    p.d.alerter = None
+    for _ in range(4):
+        assert p.process(Item(ID, 0, True)) == "retry"
+    assert p.process(Item(ID, 0, True)) == "acked"
+    assert len(sends) == 1
+    assert sends[0]["to"] == "info@acme.example"
+    assert "processing failed repeatedly" in sends[0]["text"]
+
+
+def test_get_failure_attaches_wav_left_in_workdir_before_the_error(cfg):
+    class PartialSpool(FakeSpool):
+        def get(self, item_id, dest):
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f"{item_id}.wav").write_bytes(b"RIFFpartial")
+            raise ValueError("bad json")
+
+    sends = []
+    p = make(cfg, PartialSpool(meta()), sends)
+    for _ in range(5):
+        r = p.process(Item(ID, 0, True))
+    assert r == "acked"
+    assert sends[0]["attachments"] == ((f"{ID}.wav", b"RIFFpartial", "audio/wav"),)
+
+
+def test_unexpected_send_error_does_not_stick_failures_at_one(cfg):
+    """A non-SendError raised from send() (e.g. a bad-encoding/build bug) used to escape the
+    pending_send short-circuit branch uncaught, so the failure counter never advanced past 1 and
+    the item retried forever without ever reaching the give-up fallback."""
+    attempts = []
+
+    def send(**kw):
+        attempts.append(kw)
+        raise UnicodeEncodeError("ascii", "x", 0, 1, "boom")
+
+    d = Deps(cfg=cfg, spool=FakeSpool(meta()), speech=FakeSpeech(), transcribe=ok_transcribe,
+             summarise=ok_summarise, send=send, calllog=CallLog(cfg.paths.data_dir / "calllog", 90))
+    d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to)
+    p = Processor(d)
+    for _ in range(10):
+        assert p.process(Item(ID, 0, True)) == "retry"
+    assert p.failures.get(ID, 0) != 1
+    assert len(attempts) >= 6
+
+
+def test_fallback_send_retry_then_success_alerts_exactly_once(cfg):
+    sends = []
+
+    def send(**kw):
+        sends.append(kw)
+        if len(sends) == 1:
+            raise SendError("down")
+        return "MID"
+
+    d = Deps(cfg=cfg, spool=FakeSpool(meta(line="xx")), speech=FakeSpeech(), transcribe=unexpected,
+             summarise=unexpected, send=send, calllog=CallLog(cfg.paths.data_dir / "calllog", 90))
+    d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to)
+    p = Processor(d)
+    for _ in range(4):
+        assert p.process(Item(ID, 0, True)) == "retry"
+    assert p.process(Item(ID, 0, True)) == "retry"  # give-up triggers; the fallback send itself fails once
+    assert p.process(Item(ID, 0, True)) == "acked"  # fallback send retried and succeeds; then the alert
+    assert len(sends) == 3
+    assert sends[0]["to"] == "info@acme.example" and sends[1]["to"] == "info@acme.example"
+    assert sends[2]["to"] == "admin@acme.example"
