@@ -6,9 +6,16 @@ import uuid
 
 
 class ProviderError(Exception):
-    def __init__(self, message: str, status: int | None = None):
+    """A provider call failed. str() carries only the HTTP status or the network error type: an error
+    body can echo the request (transcript, caller details), so it is kept privately in `_body` and
+    never formatted into a message or log line. `reason` is the local network error text (no
+    provider content), for `aivoicemail check`."""
+
+    def __init__(self, message: str, status: int | None = None, *, body: bytes = b"", reason: str | None = None):
         super().__init__(message)
         self.status = status
+        self._body = body
+        self.reason = reason
 
 
 def _send(req: urllib.request.Request, timeout: int) -> tuple[int, bytes]:
@@ -16,9 +23,10 @@ def _send(req: urllib.request.Request, timeout: int) -> tuple[int, bytes]:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
-        raise ProviderError(f"HTTP {e.code}: {e.read()[:100]!r}", e.code) from None
+        raise ProviderError(f"HTTP {e.code}", e.code, body=e.read()[:1000]) from None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise ProviderError(f"network error: {e}") from None
+        detail = getattr(e, "reason", None) or e
+        raise ProviderError(f"network error ({type(e).__name__})", reason=f"{type(e).__name__}: {detail}") from None
 
 
 def post_json(url, payload, *, headers, timeout=60):

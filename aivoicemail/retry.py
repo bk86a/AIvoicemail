@@ -15,7 +15,10 @@ def chain(steps, *, attempts=3, sleep=time.sleep, log=print):
                 log(f"{name}: skipped ({e})")
                 break
             except Exception as e:  # provider failures of any kind fall through
-                log(f"{name}: attempt {attempt}/{attempts} failed: {type(e).__name__}: {e}")
+                # type and HTTP status only: messages of provider/parse errors can carry content
+                status = getattr(e, "status", None)
+                log(f"{name}: attempt {attempt}/{attempts} failed: {type(e).__name__}"
+                    + (f" (HTTP {status})" if isinstance(status, int) else ""))
                 if attempt < attempts:
                     sleep(2 ** attempt)
     return None

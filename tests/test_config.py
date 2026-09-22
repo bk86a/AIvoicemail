@@ -189,3 +189,15 @@ def test_secret():
     assert config.secret({"K": ""}, "K") is None
     assert config.secret({}, "K") is None
     assert config.secret({"K": "v"}, None) is None
+
+
+@pytest.mark.parametrize("old,new,field", [
+    ('signalling_ranges = ["46.19.208.0/21", "185.238.172.0/22"]',
+     'signalling_ranges = ["46.19.208.0/33", "185.238.172.0/22"]', "[trunk].signalling_ranges"),
+    ('media_ranges      = ["46.19.208.0/21", "185.238.172.0/22"]',
+     'media_ranges      = ["46.19.208.0/21", "185.238.172.1/22"]', "[trunk].media_ranges"),
+    ('local_net = "10.0.0.0/24"', 'local_net = "10.0.0.1/24"', "[trunk].local_net"),
+])
+def test_range_errors_name_the_field(tmp_path, old, new, field):
+    problems = problems_for(tmp_path, old, new)
+    assert any(p.startswith(field + ":") for p in problems), problems

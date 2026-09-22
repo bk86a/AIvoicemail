@@ -99,12 +99,12 @@ def test_online_reports_rejected_key_and_unreachable(cfg):
     def http_get(url, *, headers, timeout=15):
         if "mistral" in url and headers.get("Authorization") == "Bearer stt-key":
             raise http.ProviderError("HTTP 401", 401)
-        raise http.ProviderError("network error: refused")
+        raise http.ProviderError("network error (URLError)", reason="URLError: refused")
 
     found = run_checks(cfg, ENV, online=True, http_get=http_get, smtp=OkSMTP)
     msgs = errors(found)
     assert any(m.startswith("remote: https://api.mistral.ai/v1 rejected the key (HTTP 401)") for m in msgs)
-    assert any(m.startswith("primary: https://api.mistral.ai/v1 unreachable") for m in msgs)
+    assert "primary: https://api.mistral.ai/v1 unreachable (URLError: refused)" in msgs
     assert not any(m.startswith("SMTP") for m in msgs)
 
 

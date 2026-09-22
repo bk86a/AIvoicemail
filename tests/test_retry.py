@@ -40,3 +40,19 @@ def test_require_key():
         retry.require_key("K", {"K": ""})
     with pytest.raises(retry.Skip):
         retry.require_key("K", {})
+
+
+def test_chain_logs_only_error_type_and_status():
+    from aivoicemail import http
+    logs = []
+
+    def rejected():
+        raise http.ProviderError("HTTP 400", 400, body=b"caller +32470123456 said Goedendag")
+
+    def other():
+        raise ValueError("transcript text Goedendag +32470123456")
+
+    retry.chain([("a", rejected), ("b", other)], sleep=lambda s: None, log=logs.append)
+    assert "a: attempt 1/3 failed: ProviderError (HTTP 400)" in logs
+    assert "b: attempt 1/3 failed: ValueError" in logs
+    assert not any("+32470123456" in l or "Goedendag" in l for l in logs)

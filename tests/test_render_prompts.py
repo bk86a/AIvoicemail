@@ -48,3 +48,29 @@ def test_cli_render_prompts_placeholder(tmp_path):
     out = tmp_path / "gen"
     assert cli.main(["--config", str(conf), "render-prompts", "--engine", "placeholder", "--out", str(out)]) == 0
     assert (out / "sounds" / "vm" / "pl-thanks-pl.wav").is_file()
+
+
+def _install(tmp_path):
+    conf = tmp_path / "install" / "config" / "aivoicemail.toml"
+    conf.parent.mkdir(parents=True)
+    (tmp_path / "install" / "prompts").symlink_to(EXAMPLE.parents[1] / "prompts")
+    conf.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    return conf
+
+
+@pytest.mark.parametrize("exc", [
+    lambda: __import__("aivoicemail.http", fromlist=["x"]).ProviderError("HTTP 401", 401, body=b"secret body"),
+    lambda: RuntimeError("piper voice download failed"),
+    lambda: __import__("subprocess").CalledProcessError(1, ["piper"]),
+])
+def test_cli_render_prompts_reports_engine_errors(tmp_path, monkeypatch, capsys, exc):
+    import aivoicemail.tts as tts
+
+    def boom(*a, **kw):
+        raise exc()
+
+    monkeypatch.setattr(tts, "render_all", boom)
+    rc = cli.main(["--config", str(_install(tmp_path)), "render-prompts", "--engine", "placeholder",
+                   "--out", str(tmp_path / "gen")])
+    err = capsys.readouterr().err
+    assert rc == 1 and err.startswith("ERROR: ") and "Traceback" not in err and "secret body" not in err

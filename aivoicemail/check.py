@@ -55,7 +55,7 @@ def _online(cfg, env, http_get, smtp, smtp_ssl):
             if ex.status in (401, 403):
                 found.append(Finding("error", f"{e.name}: {e.base_url} rejected the key (HTTP {ex.status})"))
             elif ex.status is None:
-                found.append(Finding("error", f"{e.name}: {e.base_url} unreachable ({ex})"))
+                found.append(Finding("error", f"{e.name}: {e.base_url} unreachable ({ex.reason or ex})"))
             else:
                 found.append(Finding("warning", f"{e.name}: {e.base_url}/models answered HTTP {ex.status}"))
     m = cfg.mail

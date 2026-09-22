@@ -61,6 +61,8 @@ def cmd_generate(args) -> int:
 def cmd_render_prompts(args) -> int:
     import dataclasses
     from .generate import write_all
+    import subprocess
+    from .http import ProviderError
     from .tts import RenderError, render_all
     cfg, env, _ = load_all(args)
     if args.engine:
@@ -75,6 +77,10 @@ def cmd_render_prompts(args) -> int:
         written = render_all(cfg, env, out, only=args.only, log=print)
     except RenderError as e:
         print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    except (ProviderError, RuntimeError, subprocess.CalledProcessError) as e:
+        # a TTS provider or the local engine failed; ProviderError carries the HTTP status only
+        print(f"ERROR: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
     print(f"render-prompts: {len(written)} prompt(s) in {out / 'sounds' / 'vm'}; Asterisk files in {out / 'asterisk'}")
     return 0

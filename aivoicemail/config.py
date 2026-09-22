@@ -338,8 +338,10 @@ def _trunk(r: _Reader, t: dict) -> Trunk:
     if "signalling_ranges" in t and not sig:
         r.err(f"{w}.signalling_ranges: at least one range is required")
     med = r.strings(t, "media_ranges", w, [])
-    for c in sig + med:
-        r.cidr(c, f"{w} range")
+    for c in sig:
+        r.cidr(c, f"{w}.signalling_ranges")
+    for c in med:
+        r.cidr(c, f"{w}.media_ranges")
     local_net = r.get(t, "local_net", w, str, None)
     if local_net:
         r.cidr(local_net, f"{w}.local_net")

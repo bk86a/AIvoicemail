@@ -53,18 +53,18 @@ def test_http_error_raises_provider_error(monkeypatch):
     assert e.value.status == 500
 
 
-def test_http_error_message_keeps_status_and_at_most_100_body_bytes(monkeypatch):
-    body = b"A" * 100 + b"SECRET-TAIL" * 20
+def test_http_error_keeps_body_private_and_never_in_str(monkeypatch):
+    body = b'{"error": "bad request: caller +32470123456 said Goedendag, bel mij terug"}'
 
     def fake(req, timeout):
-        raise urllib.error.HTTPError("https://x", 429, "slow", {}, io.BytesIO(body))
+        raise urllib.error.HTTPError("https://x", 400, "bad", {}, io.BytesIO(body))
 
     monkeypatch.setattr(http.urllib.request, "urlopen", fake)
     with pytest.raises(http.ProviderError) as e:
         http.post_json("https://x", {}, headers={})
-    msg = str(e.value)
-    assert e.value.status == 429 and "HTTP 429" in msg
-    assert "A" * 100 in msg and "SECRET" not in msg
+    assert e.value.status == 400 and str(e.value) == "HTTP 400"
+    assert "+32470123456" not in repr(e.value) and "Goedendag" not in repr(e.value)
+    assert b"+32470123456" in e.value._body  # kept for debugging, never formatted
 
 
 def test_network_error(monkeypatch):
@@ -74,7 +74,8 @@ def test_network_error(monkeypatch):
     monkeypatch.setattr(http.urllib.request, "urlopen", fake)
     with pytest.raises(http.ProviderError) as e:
         http.get("https://x", headers={})
-    assert e.value.status is None
+    assert e.value.status is None and str(e.value) == "network error (URLError)"
+    assert e.value.reason == "URLError: unreachable"
 
 
 def test_auth_headers():

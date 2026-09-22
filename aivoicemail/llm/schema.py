@@ -98,7 +98,8 @@ def build_prompt(transcript, meta, email_language):
         + ", ".join(SCHEMA["required"]) + "."
     )
     safe = transcript.replace("</transcript>", "</ transcript>")
-    user = f"Caller ID: {meta.get('caller', 'withheld')}\n<transcript>\n{safe}\n</transcript>"
+    # The caller ID is not needed for the summary and is never sent to the model (data minimisation).
+    user = f"<transcript>\n{safe}\n</transcript>"
     return system, user
 
 
