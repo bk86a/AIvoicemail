@@ -1,0 +1,50 @@
+# Golden-file sample: one line with a two-language menu and a fixed default language, IPv4+IPv6
+# ranges, no NAT, CDR on, extra firewall ports, local LLM without key.
+[company]
+name = "Example GmbH"
+privacy_url_default = "example.com/datenschutz"
+
+[trunk]
+provider = "example-carrier"
+signalling_ranges = ["192.0.2.0/24", "2001:db8::/32"]
+bind = "0.0.0.0:5070"
+allow_local_test = false
+
+[[line]]
+id = "main"
+did = "4930000001"
+mailbox = "office@example.com"
+email_language = "de"
+menu = ["de", "en"]
+default_language = "de"
+
+[recording]
+max_seconds = 120
+silence_seconds = 4
+
+[stt]
+chain = ["whisper_local"]
+whisper_model = "small"
+
+[llm]
+chain = ["local"]
+local = { base_url = "http://127.0.0.1:11434/v1", model = "qwen3", structured = "json_object" }
+
+[mail]
+smtp_host = "127.0.0.1"
+smtp_port = 25
+smtp_security = "none"
+from = "voicemail@example.com"
+from_name = "Example Voicemail"
+alert_to = "it@example.com"
+
+[tts]
+engine = "placeholder"
+
+[retention]
+call_log_days = 30
+cdr = true
+
+[firewall]
+allow_tcp = [22, 443]
+allow_udp = [51820]

@@ -1,0 +1,5 @@
+main-menu
+main-notice-de
+main-notice-en
+main-thanks-de
+main-thanks-en

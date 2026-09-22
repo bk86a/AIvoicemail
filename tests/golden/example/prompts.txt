@@ -1,0 +1,11 @@
+be-menu
+be-notice-nl
+be-notice-fr
+be-notice-en
+be-notice-auto
+be-thanks-nl
+be-thanks-fr
+be-thanks-en
+be-thanks-auto
+pl-notice-pl
+pl-thanks-pl

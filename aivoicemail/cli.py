@@ -40,19 +40,30 @@ def _add_worker(sub) -> None:
     p.set_defaults(func=cmd_worker)
 
 
+def cmd_generate(args) -> int:
+    from .generate import write_all
+    cfg, _, _ = load_all(args)
+    out = Path(args.out) if args.out else cfg.paths.generated_dir
+    for path in write_all(cfg, out):
+        print(f"wrote {path}")
+    return 0
+
+
 def cmd_render_prompts(args) -> int:
     import dataclasses
+    from .generate import write_all
     from .tts import RenderError, render_all
     cfg, env, _ = load_all(args)
     if args.engine:
         cfg = dataclasses.replace(cfg, tts=dataclasses.replace(cfg.tts, engine=args.engine))
     out = Path(args.out) if args.out else cfg.paths.generated_dir
+    write_all(cfg, out)  # keep the Asterisk files in step with the prompts they reference
     try:
         written = render_all(cfg, env, out, only=args.only, log=print)
     except RenderError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
-    print(f"render-prompts: {len(written)} prompt(s) in {out / 'sounds' / 'vm'}")
+    print(f"render-prompts: {len(written)} prompt(s) in {out / 'sounds' / 'vm'}; Asterisk files in {out / 'asterisk'}")
     return 0
 
 
@@ -83,7 +94,13 @@ def _add_check(sub) -> None:
     p.set_defaults(func=cmd_check)
 
 
-COMMANDS = [_add_worker, _add_render_prompts, _add_check]
+def _add_generate(sub) -> None:
+    p = sub.add_parser("generate", help="write the Asterisk files, nftables ruleset and prompt list from the config")
+    p.add_argument("--out", help="output directory (default: [paths].generated_dir)")
+    p.set_defaults(func=cmd_generate)
+
+
+COMMANDS = [_add_worker, _add_render_prompts, _add_check, _add_generate]
 
 
 def build_parser() -> argparse.ArgumentParser:
