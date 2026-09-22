@@ -18,6 +18,9 @@ services:
     image: aivoicemail-worker:0.1.0
     restart: unless-stopped
     env_file: [../.env]
+    # a local LLM/STT server on the Docker host (e.g. Ollama) is http://host.docker.internal:<port>;
+    # generate then opens that port to the Docker bridges in the host firewall
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment:
       AIVOICEMAIL_FAKE_PROVIDERS: ${AIVOICEMAIL_FAKE_PROVIDERS:-0}
     volumes:

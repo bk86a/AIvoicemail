@@ -36,6 +36,7 @@ jobs:
       - run: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.28.0 git /repo --redact --verbose
   sipp:
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     needs: unit
     steps:
       - uses: actions/checkout@v4

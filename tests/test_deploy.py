@@ -78,6 +78,18 @@ def test_only_testcall_gets_net_raw_for_sipp():
     assert '"no-new-privileges:true"' in c.split("services:")[0]
 
 
+def test_worker_reaches_host_services_via_host_docker_internal():
+    c = text("deploy/compose.worker.yaml")
+    worker_block = c.split("  worker:")[1].split("  tools:")[0]
+    assert 'extra_hosts: ["host.docker.internal:host-gateway"]' in worker_block
+
+
+def test_dockerfile_strips_setuid_bits():
+    d = text("Dockerfile")
+    assert "find / -xdev -perm /6000 -type f -exec chmod a-s {} +" in d
+    assert d.index("chmod a-s") > d.index("apt-get install")
+
+
 def test_dockerfile_grants_sipp_raw_socket_capability():
     d = text("Dockerfile")
     assert "setcap cap_net_raw+ep /usr/bin/sipp" in d
@@ -99,6 +111,11 @@ def test_dockerignore_keeps_secrets_out_of_the_image():
     ignored = text(".dockerignore").split()
     for entry in (".env", "config/aivoicemail.toml", "secrets", "generated", "data", ".git"):
         assert entry in ignored, entry
+
+
+def test_ci_sipp_job_has_a_timeout():
+    ci = text(".github/workflows/ci.yml")
+    assert "timeout-minutes: 40" in ci.split("  sipp:")[1]
 
 
 def test_cdr_logrotate_matches_default_retention():

@@ -48,7 +48,8 @@ chain = ["primary"]                  # add "secondary" for a fallback
 primary = { base_url = "https://api.mistral.ai/v1", model = "mistral-small-latest", key_env = "LLM_API_KEY", structured = "json_schema" }
 # secondary = { kind = "anthropic", model = "<model id>", key_env = "ANTHROPIC_API_KEY" }   # needs the anthropic extra
 # Azure OpenAI: base_url = "https://<resource>.openai.azure.com/openai/v1", auth = "api-key"
-# Ollama:       base_url = "http://127.0.0.1:11434/v1", no key_env, structured = "json_object"
+# Ollama on the Docker host: base_url = "http://host.docker.internal:11434/v1", no key_env, structured = "json_object"
+#               (Ollama must listen on the docker0 address, e.g. OLLAMA_HOST=172.17.0.1:11434; generate then opens 11434 to the Docker bridges only)
 
 [mail]
 smtp_host = "smtp.example"

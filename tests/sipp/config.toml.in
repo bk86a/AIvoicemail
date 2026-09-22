@@ -9,7 +9,8 @@ provider = "harness"
 signalling_ranges = ["127.0.0.1/32"]
 bind = "127.0.0.1:15060"
 media_address = "127.0.0.1"
-allow_local_test = false
+public_ip = "203.0.113.10"   # documentation address: exercises the NAT settings (local_net 127.0.0.0/8 keeps loopback RTP local)
+allow_local_test = true
 
 [[line]]
 id = "be"

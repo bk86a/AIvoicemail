@@ -34,6 +34,17 @@ def test_required_modules_loaded():
         assert m in loaded(), m
 
 
+def test_cdr_module_switch_is_included_and_required():
+    assert conf("modules.conf").rstrip().endswith('#include "modules-cdr.conf"')
+    entry = (AST / "bin" / "entrypoint").read_text()
+    assert "for f in pjsip-trunk.conf extensions-lines.conf cdr.conf modules-cdr.conf; do" in entry
+
+
+def test_stasis_stub_is_comment_only():
+    lines = [l for l in conf("stasis.conf").splitlines() if l.strip()]
+    assert lines and all(l.lstrip().startswith(";") for l in lines)
+
+
 def test_management_interfaces_disabled():
     assert re.search(r"^enabled\s*=\s*no\s*$", conf("manager.conf"), re.M)
     assert re.search(r"^enabled\s*=\s*no\s*$", conf("http.conf"), re.M)
@@ -57,6 +68,14 @@ def test_called_number_filtered_to_digits():
     assert "same => n(reject),Hangup(1)" in ext
     assert "Set(VM_CID=${FILTER(0123456789+,${CALLERID(num)})})" in ext
     assert '#include "extensions-lines.conf"' in ext
+
+
+def test_catch_all_extension_rejects_every_other_called_number():
+    """A bare "+", a single digit or a non-digit start must exist in from-trunk (else PJSIP answers
+    484/404 itself and logs the raw number); `_.`/`_!` would make pbx_config warn at startup."""
+    ext = conf("extensions.conf")
+    assert "exten => _[\x01-~]!,1,Hangup(1)\n" in ext
+    assert not re.search(r"^exten => _[.!],", ext, re.M)
 
 
 def test_system_arguments_all_single_quoted():

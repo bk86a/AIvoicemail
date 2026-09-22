@@ -2,7 +2,7 @@
 # Assemble /etc/asterisk (tmpfs) from the baked-in hardened base and the generated include files,
 # then run Asterisk in the foreground without -v (console logging stays at notice level).
 set -eu
-for f in pjsip-trunk.conf extensions-lines.conf cdr.conf; do
+for f in pjsip-trunk.conf extensions-lines.conf cdr.conf modules-cdr.conf; do
   if [ ! -f "/etc/asterisk-env/$f" ]; then
     echo "missing generated/asterisk/$f: run 'aivoicemail render-prompts' (or 'generate') first" >&2
     exit 1

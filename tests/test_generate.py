@@ -14,8 +14,8 @@ CASES = {"example": EXAMPLE, "single": GOLDEN / "single" / "config" / "aivoicema
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_golden_files(case):
     got = generate.files(config.load(CASES[case]))
-    assert sorted(got) == ["asterisk/cdr.conf", "asterisk/extensions-lines.conf", "asterisk/pjsip-trunk.conf",
-                           "nftables/aivoicemail.nft", "prompts.txt"]
+    assert sorted(got) == ["asterisk/cdr.conf", "asterisk/extensions-lines.conf", "asterisk/modules-cdr.conf",
+                           "asterisk/pjsip-trunk.conf", "nftables/aivoicemail.nft", "prompts.txt"]
     if os.environ.get("UPDATE_GOLDEN") == "1":
         for rel, content in got.items():
             (GOLDEN / case / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -178,3 +178,50 @@ def test_cli_render_prompts_reports_generate_value_error(tmp_path, monkeypatch, 
     err = capsys.readouterr().err
     assert "ERROR: generate: refusing to interpolate invalid trunk.bind" in err
     assert "Traceback" not in err
+
+
+def _with_cdr(cfg, on):
+    return dataclasses.replace(cfg, retention=dataclasses.replace(cfg.retention, cdr=on))
+
+
+def test_modules_cdr_include_noloads_cdr_csv_when_cdr_off(example_cfg):
+    off = generate.files(_with_cdr(example_cfg, False))["asterisk/modules-cdr.conf"]
+    on = generate.files(_with_cdr(example_cfg, True))["asterisk/modules-cdr.conf"]
+    assert "noload = cdr_csv.so" in off.splitlines()
+    assert not [l for l in on.splitlines() if l.strip() and not l.lstrip().startswith(";")]
+
+
+def test_local_test_adds_loopback_local_net_when_public_ip_set(example_cfg):
+    pjsip = generate.pjsip_trunk(example_cfg)  # public_ip set, allow_local_test defaults to true
+    assert "local_net = 10.0.0.0/24\n" in pjsip and "local_net = 127.0.0.0/8\n" in pjsip
+    no_test = dataclasses.replace(example_cfg, trunk=dataclasses.replace(example_cfg.trunk, allow_local_test=False))
+    assert "127.0.0.0/8" not in generate.pjsip_trunk(no_test)
+    no_nat = dataclasses.replace(example_cfg, trunk=dataclasses.replace(example_cfg.trunk, public_ip=None))
+    assert "127.0.0.0/8" not in generate.pjsip_trunk(no_nat)
+
+
+def _with_llm_url(cfg, url):
+    ep = config.Endpoint(name="local", model="m", base_url=url, structured="json_object")
+    return dataclasses.replace(cfg, llm=config.Llm(chain=("local",), endpoints={"local": ep}))
+
+
+def test_nftables_allows_docker_bridges_to_host_docker_internal_endpoint(example_cfg):
+    nft = generate.nftables(_with_llm_url(example_cfg, "http://host.docker.internal:11434/v1"))
+    assert '    iifname "docker0" tcp dport 11434 accept\n' in nft
+    assert '    iifname "br-*" tcp dport 11434 accept\n' in nft
+
+
+def test_nftables_host_docker_internal_default_port_and_stt(example_cfg):
+    ep = config.Endpoint(name="local", model="m", base_url="http://host.docker.internal/v1")
+    cfg = dataclasses.replace(example_cfg, stt=dataclasses.replace(example_cfg.stt, endpoints={"local": ep}))
+    assert 'iifname "docker0" tcp dport 80 accept' in generate.nftables(cfg)
+
+
+def test_nftables_no_bridge_rule_for_remote_endpoints(example_cfg):
+    assert "iifname" not in generate.nftables(example_cfg)
+    assert "iifname" not in generate.nftables(_with_llm_url(example_cfg, "http://127.0.0.1:11434/v1"))
+
+
+def test_nftables_allows_dhcpv6_client(example_cfg):
+    nft = generate.nftables(example_cfg)
+    assert "    udp sport 67 udp dport 68 accept\n    udp sport 547 udp dport 546 accept\n" in nft

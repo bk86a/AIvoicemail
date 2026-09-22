@@ -5,6 +5,7 @@ RUN apt-get update \
  && setcap cap_net_raw+ep /usr/bin/sipp \
  && apt-get purge -y --auto-remove libcap2-bin \
  && rm -rf /var/lib/apt/lists/* \
+ && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && groupadd -g 5060 aivm \
  && useradd -u 10001 -g 5060 -M -d /var/lib/aivoicemail -s /usr/sbin/nologin aivm \
  && install -d -o 10001 -g 5060 -m 0750 /var/lib/aivoicemail \

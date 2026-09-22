@@ -24,6 +24,7 @@ table inet aivoicemail {
     ip protocol icmp accept
     meta l4proto ipv6-icmp accept
     udp sport 67 udp dport 68 accept
+    udp sport 547 udp dport 546 accept
     tcp dport 22 accept
     ip saddr @trunk_sig_v4 udp dport 5060 accept
     ip saddr @trunk_media_v4 udp dport 10000-20000 accept
