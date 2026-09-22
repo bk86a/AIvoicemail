@@ -95,3 +95,12 @@ def test_timeout_is_spool_error(tmp_path):
         raise subprocess.TimeoutExpired(args, timeout)
     with pytest.raises(SpoolError):
         ssh.SshSpool("t", tmp_path / "k", tmp_path / "h", runner=runner).list()
+
+
+def test_oserror_from_runner_is_spool_error(tmp_path):
+    """subprocess.run itself can raise OSError (e.g. fork/exec failure, ssh binary missing) rather
+    than returning a CompletedProcess - that must not escape as a bare OSError."""
+    def runner(args, capture_output, timeout):
+        raise OSError("fork failed")
+    with pytest.raises(SpoolError):
+        ssh.SshSpool("t", tmp_path / "k", tmp_path / "h", runner=runner).list()

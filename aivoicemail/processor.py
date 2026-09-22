@@ -48,6 +48,7 @@ class Processor:
         self.pending_send: dict[str, Pending] = {}
         self.failures: dict[str, int] = {}
         self.giveup_alert_pending: set[str] = set()
+        self.send_failed_logged: set[str] = set()
 
     def process(self, item) -> str:
         if item.id in self.sent_pending_ack:
@@ -80,26 +81,35 @@ class Processor:
     def _retry_saved(self, item_id, fn) -> str:
         """Re-run a cached ack-only or send-only retry under the same failure accounting as a fresh
         attempt, so an unexpected (non-SpoolError/SendError) exception from it can't retry forever
-        without ever reaching the give-up threshold."""
+        without ever reaching the give-up threshold.
+
+        The ack-only case (item_id already in sent_pending_ack) is different: the email was already
+        delivered successfully, so it must NEVER be resent - not even via give-up's fallback email.
+        It is retried forever; once failures reach max_failures a single best-effort "ack failing"
+        alert is raised (no personal data) and it keeps being retried."""
+        is_ack_only = item_id in self.sent_pending_ack
         try:
             result = fn()
         except SpoolError as e:
             self.d.log(f"{item_id}: spool error: {e}")
             return "retry"
         except Exception as e:
-            pending = self.pending_send.get(item_id)
-            if pending is not None:
-                meta, attachments = pending.meta, pending.attachments
-            else:
-                saved = self.sent_pending_ack.get(item_id)
-                meta, attachments = (saved[0] if saved is not None else {"id": item_id}), ()
             count = self._bump_failures(item_id, e)
-            if count < self.d.cfg.worker.max_failures:
+            limit = self.d.cfg.worker.max_failures
+            if is_ack_only:
+                if count == limit:
+                    self._alert_ack_failing(item_id)
                 return "retry"
-            self.pending_send.pop(item_id, None)
-            self.sent_pending_ack.pop(item_id, None)
+            if count < limit:
+                return "retry"
+            pending = self.pending_send.pop(item_id, None)
+            meta = pending.meta if pending is not None else {"id": item_id}
+            attachments = pending.attachments if pending is not None else ()
             return self._give_up(item_id, meta, None, attachments=attachments)
-        self.failures.pop(item_id, None)
+        # Only a genuine success resets the counter - a "retry" here means fn() itself already
+        # turned a SendError/SpoolError into a handled retry, which is not progress.
+        if result == "acked":
+            self.failures.pop(item_id, None)
         return result
 
     def _pipeline(self, item_id, meta, wav) -> str:
@@ -138,14 +148,16 @@ class Processor:
         self.d.log(f"{meta.get('id')} {meta.get('line')} {outcome} msg={message_id}")
 
     def _deliver(self, item_id, pending: Pending) -> str:
-        first_attempt = item_id not in self.pending_send
         self.pending_send[item_id] = pending
         try:
             message_id = self.d.send(to=pending.to, subject=pending.email.subject, text=pending.email.text,
                                      attachments=pending.attachments)
         except SendError as e:
             self.d.log(f"{item_id}: send failed, will retry: {e}")
-            if first_attempt:
+            # Logged once per item, ever - not once per Pending, so a later give-up fallback email
+            # hitting its own SendError doesn't add a second "send-failed" call-log entry.
+            if item_id not in self.send_failed_logged:
+                self.send_failed_logged.add(item_id)
                 self._log_call(pending.meta, "send-failed", providers=pending.providers)
             return "retry"
         self.pending_send.pop(item_id, None)
@@ -167,7 +179,22 @@ class Processor:
                 f"Item {item_id} failed processing {self.d.cfg.worker.max_failures} times in a row; it was sent "
                 "to the mailbox as a fallback email and removed from the spool.", self.d.clock())
         except Exception as e:
-            self.d.log(f"{item_id}: give-up alert failed: {type(e).__name__}: {e}")
+            self.d.log(f"{item_id}: give-up alert failed: {type(e).__name__}")
+
+    def _alert_ack_failing(self, item_id) -> None:
+        """Best-effort operator alert: the email was already delivered but acking (removing the
+        item from the spool) keeps failing. Never resends anything - it only informs the operator
+        once; failures here are logged, never raised."""
+        if self.d.alerter is None:
+            return
+        try:
+            self.d.alerter.notify(
+                "ack failing",
+                f"Item {item_id} could not be acknowledged (removed from the spool) after "
+                f"{self.d.cfg.worker.max_failures} attempts, although its email was already "
+                "delivered; it will keep being retried.", self.d.clock())
+        except Exception as e:
+            self.d.log(f"{item_id}: ack-failing alert failed: {type(e).__name__}")
 
     def _ack(self, item_id, *, retry=False) -> str:
         try:
@@ -176,6 +203,7 @@ class Processor:
             self.d.log(f"{item_id}: ack failed, will retry ack only: {e}")
             return "retry"
         meta, message_id = self.sent_pending_ack.pop(item_id, ({"id": item_id}, None))
+        self.send_failed_logged.discard(item_id)
         if retry:
             self._log_call(meta, "acked-after-retry", message_id=message_id)
         return "acked"
@@ -210,5 +238,5 @@ class Processor:
             # Safety net only: _deliver already handles SendError itself. Anything else escaping
             # it here (e.g. the fallback send raising a non-SendError error too) must not crash
             # process() - leave it to be retried like any other pending send.
-            self.d.log(f"{item_id}: give-up delivery failed unexpectedly, will retry: {type(e).__name__}: {e}")
+            self.d.log(f"{item_id}: give-up delivery failed unexpectedly, will retry: {type(e).__name__}")
             return "retry"

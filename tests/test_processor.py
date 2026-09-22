@@ -410,3 +410,73 @@ def test_fallback_send_retry_then_success_alerts_exactly_once(cfg):
     assert len(sends) == 3
     assert sends[0]["to"] == "info@acme.example" and sends[1]["to"] == "info@acme.example"
     assert sends[2]["to"] == "admin@acme.example"
+
+
+def test_ack_only_retry_never_resends_the_email(cfg):
+    """Once the email has been delivered (item sitting in sent_pending_ack), a persistent
+    non-SpoolError ack failure must never trigger give-up's fallback resend - only the ack itself
+    is retried, forever."""
+    sends = []
+
+    class FlakyAckSpool(FakeSpool):
+        def ack(self, item_id):
+            raise OSError("disk gone")
+
+    sp = FlakyAckSpool(meta(has_audio=False), wav=None)
+    p = make(cfg, sp, sends)
+    p.d.alerter = None
+    for _ in range(20):
+        assert p.process(Item(ID, 0, False)) == "retry"
+    assert len(sends) == 1
+    assert sends[0]["to"] == "info@acme.example"
+    assert sp.acked == []
+    assert ID in p.sent_pending_ack
+
+
+def test_interleaved_unexpected_and_send_errors_still_reach_give_up(cfg):
+    """A SendError (handled, returns "retry" without raising) must not reset the failure counter
+    that a different, unexpected exception is building up on the same cached pending - otherwise
+    the two interleaved never escalate to give-up."""
+    attempts = []
+
+    def send(**kw):
+        attempts.append(kw)
+        n = len(attempts)
+        if n <= 9:
+            if n % 2 == 1:
+                raise UnicodeEncodeError("ascii", "x", 0, 1, "boom")
+            raise SendError("down")
+        return "MID"
+
+    d = Deps(cfg=cfg, spool=FakeSpool(meta()), speech=FakeSpeech(), transcribe=ok_transcribe,
+             summarise=ok_summarise, send=send, calllog=CallLog(cfg.paths.data_dir / "calllog", 90))
+    d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to)
+    p = Processor(d)
+    results = [p.process(Item(ID, 0, True)) for _ in range(12)]
+    assert "acked" in results
+    assert any(c["outcome"] == "fallback-failed-repeatedly" for c in calls(cfg))
+    assert ID not in p.failures
+
+
+def test_send_failed_logged_only_once_per_item_even_after_giveup(cfg):
+    attempts = []
+
+    def send(**kw):
+        attempts.append(kw)
+        n = len(attempts)
+        if n == 1:
+            raise SendError("down")
+        if 2 <= n <= 6:
+            raise UnicodeEncodeError("ascii", "x", 0, 1, "boom")
+        if n == 7:
+            raise SendError("down")
+        return "MID"
+
+    d = Deps(cfg=cfg, spool=FakeSpool(meta()), speech=FakeSpeech(), transcribe=ok_transcribe,
+             summarise=ok_summarise, send=send, calllog=CallLog(cfg.paths.data_dir / "calllog", 90))
+    d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to)
+    p = Processor(d)
+    results = [p.process(Item(ID, 0, True)) for _ in range(9)]
+    assert "acked" in results
+    outcomes = [c["outcome"] for c in calls(cfg)]
+    assert outcomes.count("send-failed") == 1

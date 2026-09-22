@@ -51,6 +51,8 @@ class SshSpool:
             r = self.runner(self.base + [command], capture_output=True, timeout=120)
         except subprocess.TimeoutExpired:
             raise SpoolError(f"{verb}: timeout") from None
+        except OSError as e:
+            raise SpoolError(f"{verb}: {type(e).__name__}: {e}") from None
         if r.returncode != 0:
             raise SpoolError(f"{verb}: exit {r.returncode}: {r.stderr[:200]!r}")
         return r.stdout
