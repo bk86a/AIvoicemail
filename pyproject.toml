@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aivoicemail"
+version = "0.1.0"
+description = "Self-hosted, GDPR-first AI voicemail: Asterisk answers, local Whisper transcribes, an LLM summarises, the business gets an email."
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.12"
+dependencies = ["faster-whisper==1.2.1", "piper-tts==1.3.0"]
+
+[project.optional-dependencies]
+anthropic = ["anthropic==1.7.0"]
+dev = ["pytest==8.4.2", "pip-tools==7.5.0"]
+
+[project.scripts]
+aivoicemail = "aivoicemail.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["aivoicemail*"]
+
+[tool.setuptools.package-data]
+aivoicemail = ["sipp/scenarios/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
