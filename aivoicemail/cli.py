@@ -64,7 +64,26 @@ def _add_render_prompts(sub) -> None:
     p.set_defaults(func=cmd_render_prompts)
 
 
-COMMANDS = [_add_worker, _add_render_prompts]
+def cmd_check(args) -> int:
+    from .check import run_checks
+    cfg, env, env_file = load_all(args)
+    found = run_checks(cfg, env, env_file=env_file, online=args.online)
+    for f in found:
+        print(f"{f.level.upper()}: {f.message}")
+    n_err = sum(f.level == "error" for f in found)
+    print(f"check: {n_err} error(s), {len(found) - n_err} warning(s)")
+    if not n_err:
+        print("lines: " + ", ".join(f"{l.id} ({l.did})" for l in cfg.lines))
+    return 1 if n_err else 0
+
+
+def _add_check(sub) -> None:
+    p = sub.add_parser("check", help="validate config, prompts, secrets and (optionally) endpoints")
+    p.add_argument("--online", action="store_true", help="also contact provider endpoints and the SMTP server")
+    p.set_defaults(func=cmd_check)
+
+
+COMMANDS = [_add_worker, _add_render_prompts, _add_check]
 
 
 def build_parser() -> argparse.ArgumentParser:
