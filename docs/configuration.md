@@ -62,7 +62,8 @@ IP-authenticated trunks only in v0.1: SIP is accepted from these ranges, everyth
   - `kind` - `"openai_compatible"` (default) or `"anthropic"` (LLM only; needs `pip install aivoicemail[anthropic]`,
     included in the image).
   - `base_url` - API root, e.g. `https://api.mistral.ai/v1`, `https://<resource>.openai.azure.com/openai/v1`,
-    `http://127.0.0.1:11434/v1` (Ollama).
+    `http://host.docker.internal:11434/v1` (Ollama on the Docker host; see
+    [install.md](install.md#local-language-model-ollama)).
   - `model` - model or deployment name.
   - `key_env` - environment variable holding the key; omit for keyless local servers. A named key
     that is not set skips the provider.
@@ -87,6 +88,8 @@ IP-authenticated trunks only in v0.1: SIP is accepted from these ranges, everyth
   `{ nl = "nl-BE-DenaNeural" }` (Azure). Every menu language needs one.
 - `pronunciation` - IPA per word and language, e.g. `{ "ACME" = { en = "ˈæk.mi" } }`; Azure receives
   `<phoneme>` tags, Piper raw phonemes.
+  Piper voices are downloaded at run time and each voice carries its own licence (see the voice's
+  model card); check it before use.
 - `sentence_ms` - pause between sentences of the notices, default 300.
 - `azure` - `{ region = "westeurope", key_env = "AZURE_SPEECH_KEY" }` for `engine = "azure"`.
 
@@ -98,7 +101,9 @@ IP-authenticated trunks only in v0.1: SIP is accepted from these ranges, everyth
 ## `[worker]` (optional)
 
 - `poll_seconds` - spool poll interval, default 30.
-- `stale_minutes` - alert when an item waits longer, default 60.
+- `stale_minutes` - alert when an item waits longer, default 60. Independently the worker alerts
+  ("stale orphan") on orphaned audio older than 60 minutes: files left in the spool's `tmp/` or WAVs
+  in `ready/` without metadata. They are never deleted automatically.
 - `unreachable_minutes` - alert when the spool cannot be listed for longer, default 15.
 - `max_failures` - consecutive failures before an item is sent as a fallback and removed, default 5.
 

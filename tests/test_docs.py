@@ -65,3 +65,41 @@ def test_install_documents_firewall_rollback_and_split_mode():
 
 def test_security_policy_has_private_reporting():
     assert "private vulnerability reporting" in " ".join(read("SECURITY.md").split())
+
+
+def test_docs_caveat_pjsip_logs_from_uri_of_unidentified_sources():
+    for path in ("README.md", "docs/gdpr-ai-act.md", "SECURITY.md"):
+        assert "From URI" in read(path), path
+
+
+def test_install_updates_mention_possible_duplicate_email():
+    updates = read("docs/install.md").split("## Updates")[1].split("## ")[0]
+    assert "restart" in updates and "one email" in updates
+
+
+def test_piper_voice_licences_documented():
+    for path in ("docs/configuration.md", "README.md"):
+        assert "licence" in read(path) and "Piper" in read(path), path
+    assert "voice" in read("docs/configuration.md").split("licence")[0][-200:]
+
+
+def test_security_mentions_spoofed_invites():
+    doc = read("SECURITY.md")
+    assert "spoofed" in doc and "missed-call" in doc
+
+
+def test_local_llm_via_host_docker_internal_documented():
+    doc = read("docs/install.md")
+    assert "http://host.docker.internal:11434/v1" in doc and "OLLAMA_HOST" in doc
+    assert "`[firewall] allow_tcp`" in doc and "docker0" in doc
+    assert "http://host.docker.internal:11434/v1" in read("docs/configuration.md")
+    assert "127.0.0.1:11434" not in read("docs/configuration.md") + read("config/aivoicemail.example.toml")
+
+
+def test_gdpr_lists_what_is_sent_to_processors():
+    doc = read("docs/gdpr-ai-act.md")
+    assert "transcript only" in doc and "caller number" in doc.split("## Processors")[1]
+
+
+def test_orphan_alert_documented():
+    assert "orphan" in read("docs/install.md") and "orphan" in read("docs/configuration.md")

@@ -98,7 +98,7 @@ Restart without the variable (`docker compose up -d`) to go live.
 Asterisk uses host networking, so the host firewall decides who can reach SIP and RTP.
 `aivoicemail generate` (also run by `render-prompts`) writes `generated/nftables/aivoicemail.nft`:
 its own `inet aivoicemail` table with policy drop that admits loopback, established traffic, ICMP,
-DHCP replies, the ports in `[firewall]` (SSH 22 by default) and SIP/RTP only from the trunk ranges.
+DHCP and DHCPv6 replies, the ports in `[firewall]` (SSH 22 by default) and SIP/RTP only from the trunk ranges.
 Other tables and chains are left untouched, but because every input chain must accept a packet,
 anything else the host serves must be listed under `[firewall]`.
 
@@ -122,6 +122,25 @@ sudo systemctl daemon-reload && sudo systemctl enable --now aivoicemail-nft
 **Cloud firewalls / security groups:** allow UDP 5060 and UDP 10000-20000 only from the trunk's
 ranges. When the provider's rule quota is small, merge them into one rule per range covering UDP
 5060-20000; the host firewall still limits SIP to 5060.
+
+### Local language model (Ollama)
+
+The worker runs on a Docker bridge network, so `127.0.0.1` inside it is the container, not the host.
+Point the endpoint at the host through the `host.docker.internal` alias the worker service defines
+(`extra_hosts: ["host.docker.internal:host-gateway"]`):
+
+```toml
+[llm]
+chain = ["local"]
+local = { base_url = "http://host.docker.internal:11434/v1", model = "<model>", structured = "json_object" }
+```
+
+Make Ollama listen on the Docker bridge address, e.g. `OLLAMA_HOST=172.17.0.1:11434` (the `docker0`
+address, `ip -4 addr show docker0`), not only on `127.0.0.1`. Bridge traffic to the host passes the
+host firewall's input chain, and a `[firewall] allow_tcp` entry is not the right fix: it would open the
+port to the whole internet. Instead `generate` adds `iifname "docker0"` and `iifname "br-*"` rules for
+the port of every `[stt]`/`[llm]` endpoint whose host is `host.docker.internal` (port 80/443 when the
+URL has none); re-run `./aivm generate` and re-apply the ruleset after changing the endpoint.
 
 ## Optional CDR
 
@@ -198,7 +217,9 @@ git pull && docker compose up -d --build
 ```
 
 The spool persists; items in flight are picked up again. Re-run `./aivm check` and
-`./aivm render-prompts` when the release notes mention prompt or config changes.
+`./aivm render-prompts` when the release notes mention prompt or config changes (in split mode also
+re-install `vm-spool` on the telephony host). A worker restart between sending an email and removing
+its item from the spool can resend that one email after the restart.
 
 ## Troubleshooting
 
@@ -207,4 +228,6 @@ The spool persists; items in flight are picked up again. Re-run `./aivm check` a
   they contain caller numbers, so turn them off again and clear the log.
 - `docker compose logs worker` shows one line per item: `<id> <line> <outcome> msg=<message id>`.
 - Menu keys ignored: see the telephone-event note in [carriers.md](carriers.md).
-- Alerts (stale items, unreachable spool) go to `[mail] alert_to`, at most one per condition per hour.
+- Alerts (stale items, unreachable spool, stale orphan audio in the spool's `tmp/` or `ready/`,
+  items that failed repeatedly) go to `[mail] alert_to`, at most one per condition per hour. Orphaned
+  files are never deleted automatically: inspect and remove them on the telephony host.

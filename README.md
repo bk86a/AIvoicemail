@@ -29,11 +29,18 @@ mailbox receives an email. The audio is deleted once the email has been accepted
   missing.
 - The call log holds metadata only (time, line, caller number, outcome, providers, message ID), is
   rotated daily and deleted after 90 days. Container logs carry IDs and outcomes, never caller numbers.
+  One exception: Asterisk's SIP stack logs the From URI (which can hold a caller number) of a request
+  from an unidentified source before rejecting it; the host firewall blocks such sources in normal
+  operation.
+- The language model receives the transcript only, never the caller number.
 - Secrets come only from environment variables or a `.env` file.
 - A fully local setup (local Whisper plus a local model via Ollama or vLLM) sends nothing to third
   parties except the email itself.
 
 See [docs/gdpr-ai-act.md](docs/gdpr-ai-act.md) for a checklist (not legal advice).
+
+Piper voices are downloaded at run time and each voice has its own licence (see its model card);
+check that it allows your use before going live.
 
 ## Quickstart (single host)
 

@@ -26,14 +26,22 @@ GDPR Art. 13 layered notice). Your written privacy notice at `privacy_url` shoul
 - Call log: metadata only (no transcript or summary), one file per day, deleted after
   `call_log_days` (default 90).
 - Asterisk CDR CSV: off by default; when on, rotate it with the same retention.
-- Container logs: IDs and outcomes only, size-capped.
+- Container logs: IDs and outcomes only, size-capped. Exception: Asterisk's SIP stack logs the
+  From URI (which can hold a caller number) of a request from an unidentified source when it rejects
+  it; the host firewall blocks such sources in normal operation.
 - Emails: the recipients' mailboxes are outside aivoicemail - set a retention policy there.
 
 ## Processors and data minimisation
 
+What each processor receives: a remote speech-to-text provider gets the recording only; a language
+model provider gets the transcript only (the caller number is not sent); the email provider gets the
+email (caller number, summary, transcript and, for fallback emails, the recording).
+
 - [ ] sign a data processing agreement with every remote provider in `[stt]` and `[llm]` and with
       your email provider; prefer EU-hosted endpoints
 - [ ] for a local-only setup use `chain = ["whisper_local"]` and a local model (Ollama, vLLM)
+- [ ] check the licence of each Piper voice you use (voices are downloaded at run time, each with its
+      own licence)
 - [ ] keep `alert_to` an internal operator address (alerts contain no caller data)
 - [ ] record the processing in your register (Art. 30) and assess whether a DPIA is needed
 
