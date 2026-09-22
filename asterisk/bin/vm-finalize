@@ -1,0 +1,36 @@
+#!/bin/sh
+# vm-finalize LINE LANG CALLER DID START_EPOCH UNIQUEID RECORDED  (Asterisk hangup handler)
+# Writes <uuid>.wav (if recorded) then <uuid>.json into ready/, the JSON last (the worker lists JSON).
+# Every argument is re-sanitised here even though the dialplan only passes constants and digits.
+set -eu
+umask 002
+line=$1; lang=$2; caller=$3; did=$4; start=$5; uid=$6; recorded=$7
+# VM_SPOOL only overrides the path in tests; Asterisk never sets it.
+spool=${VM_SPOOL:-/srv/aivoicemail/spool}
+case "$line" in ''|*[!a-z0-9]*) exit 0 ;; esac
+[ "${#line}" -le 16 ] || exit 0
+case "$lang" in auto|[a-z][a-z]) ;; *) exit 0 ;; esac
+caller=$(printf '%s' "$caller" | tr -cd '0-9+' | cut -c1-32)
+[ -n "$caller" ] || caller=withheld
+# Carriers often deliver E.164 without the '+': 8-15 digits not starting with 0 get it prepended.
+if printf '%s' "$caller" | grep -Eqx '[1-9][0-9]{7,14}'; then caller="+$caller"; fi
+did=$(printf '%s' "$did" | tr -cd '0-9' | cut -c1-20)
+start=$(printf '%s' "$start" | tr -cd '0-9')
+uid_safe=$(printf '%s' "$uid" | tr -cd '0-9.')
+id=$(cat /proc/sys/kernel/random/uuid)
+now=$(date -u +%s)
+mkdir -p "$spool/tmp" "$spool/ready"
+wav="$spool/tmp/$uid_safe.wav"
+has_audio=false; duration=0
+if [ "$recorded" = "1" ] && [ -s "$wav" ] && [ "$(stat -c %s "$wav")" -gt 44 ]; then
+  has_audio=true
+  duration=$(( ($(stat -c %s "$wav") - 44) / 16000 ))
+  mv "$wav" "$spool/ready/$id.wav"
+else
+  rm -f "$wav"
+fi
+tmpjson="$spool/tmp/$id.json"
+printf '{"id":"%s","line":"%s","did":"%s","caller":"%s","lang_choice":"%s","started_at":"%s","ended_at":"%s","duration_s":%s,"has_audio":%s}\n' \
+  "$id" "$line" "$did" "$caller" "$lang" \
+  "$(date -u -d "@${start:-$now}" +%FT%TZ)" "$(date -u -d "@$now" +%FT%TZ)" "$duration" "$has_audio" > "$tmpjson"
+mv "$tmpjson" "$spool/ready/$id.json"
