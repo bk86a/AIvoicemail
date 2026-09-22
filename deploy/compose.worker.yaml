@@ -1,0 +1,47 @@
+# Processing host: the worker service, plus the "tools" profile that runs the aivoicemail CLI
+# (./aivm <command>). Single host: included by deploy/compose.yaml. Split mode: run this file alone.
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  user: "10001:5060"
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
+
+services:
+  worker:
+    <<: *hardening
+    build: {context: .., dockerfile: Dockerfile}
+    image: aivoicemail-worker:0.1.0
+    restart: unless-stopped
+    env_file: [../.env]
+    environment:
+      AIVOICEMAIL_FAKE_PROVIDERS: ${AIVOICEMAIL_FAKE_PROVIDERS:-0}
+    volumes:
+      - ../config:/opt/aivoicemail/config:ro
+      - ../secrets:/opt/aivoicemail/secrets:ro
+      - ${AIVM_SPOOL_DIR:-/srv/aivoicemail/spool}:/srv/aivoicemail/spool
+      - data:/var/lib/aivoicemail
+    tmpfs:
+      - /run/aivoicemail:uid=10001,gid=5060,mode=0700
+      - /tmp:uid=10001,gid=5060,mode=0700
+
+  tools:
+    <<: *hardening
+    build: {context: .., dockerfile: Dockerfile}
+    image: aivoicemail-worker:0.1.0
+    profiles: [tools]
+    network_mode: host
+    env_file: [../.env]
+    volumes:
+      - ../config:/opt/aivoicemail/config:ro
+      - ../.env:/opt/aivoicemail/.env:ro
+      - ../overrides:/opt/aivoicemail/overrides:ro
+      - ../generated:/opt/aivoicemail/generated
+      - data:/var/lib/aivoicemail
+    tmpfs:
+      - /tmp:uid=10001,gid=5060,mode=0700
+
+volumes:
+  data:

@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.env
+config/aivoicemail.toml
+generated
+overrides
+secrets
+data
+docs
+tests
+**/__pycache__

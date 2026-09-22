@@ -1,0 +1,16 @@
+# Optional Asterisk CDR CSV ([retention].cdr = true), kept 90 days = [retention].call_log_days.
+# Install as /etc/logrotate.d/aivoicemail-cdr on the telephony host. cdr_csv reopens Master.csv for
+# every record, so logrotate only renames it and Asterisk (uid 5060) recreates it on the next call:
+# no copytruncate, and nocreate because the host has no uid 5060 user. Change rotate/maxage together
+# with call_log_days.
+/srv/aivoicemail/cdr/Master.csv {
+    daily
+    rotate 90
+    maxage 90
+    missingok
+    notifempty
+    compress
+    delaycompress
+    nocreate
+    su root root
+}

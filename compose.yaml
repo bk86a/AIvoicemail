@@ -1,0 +1,4 @@
+# `docker compose up -d` in the repository root starts the single-host deployment.
+name: aivoicemail
+include:
+  - deploy/compose.yaml

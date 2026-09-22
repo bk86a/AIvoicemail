@@ -1,0 +1,4 @@
+# Single host: Asterisk and the worker on one machine, sharing /srv/aivoicemail/spool.
+include:
+  - compose.telephony.yaml
+  - compose.worker.yaml

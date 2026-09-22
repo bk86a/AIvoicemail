@@ -1,0 +1,27 @@
+# Telephony host: Asterisk only. Single host: included by deploy/compose.yaml.
+# Split mode: run this file alone on the SIP host (docker compose -f deploy/compose.telephony.yaml up -d).
+services:
+  asterisk:
+    build: ../asterisk
+    image: aivoicemail-asterisk:0.1.0
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "5060:5060"
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+    volumes:
+      - ${AIVM_GENERATED_DIR:-../generated}/asterisk:/etc/asterisk-env:ro
+      - ${AIVM_GENERATED_DIR:-../generated}/sounds:/usr/share/asterisk/sounds:ro
+      - ${AIVM_SPOOL_DIR:-/srv/aivoicemail/spool}:/srv/aivoicemail/spool
+      - ${AIVM_CDR_DIR:-/srv/aivoicemail/cdr}:/var/log/asterisk/cdr-csv
+    tmpfs:
+      - /etc/asterisk:uid=5060,gid=5060,mode=0750
+      - /var/lib/asterisk:uid=5060,gid=5060
+      - /var/spool/asterisk:uid=5060,gid=5060
+      - /var/log/asterisk:uid=5060,gid=5060
+      - /var/run/asterisk:uid=5060,gid=5060
+      - /tmp:uid=5060,gid=5060

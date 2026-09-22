@@ -1,0 +1,17 @@
+# Loads generated/nftables/aivoicemail.nft at boot. Install:
+#   sudo install -D -m 0644 generated/nftables/aivoicemail.nft /etc/aivoicemail/aivoicemail.nft
+#   sudo install -m 0644 deploy/nftables/aivoicemail-nft.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now aivoicemail-nft
+[Unit]
+Description=aivoicemail host input filter (table inet aivoicemail)
+After=network-pre.target
+Before=network-online.target docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/aivoicemail/aivoicemail.nft
+ExecStop=/usr/sbin/nft delete table inet aivoicemail
+
+[Install]
+WantedBy=multi-user.target
