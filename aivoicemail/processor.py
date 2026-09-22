@@ -155,8 +155,23 @@ class Processor:
                                               render.message(line, meta, transcript, summary, providers), (), providers))
 
     def _log_call(self, meta, outcome, *, providers=None, message_id=None) -> None:
-        self.d.calllog.record(meta, outcome, providers=providers, message_id=message_id)
+        """Best effort: CallLog handles OSError itself, but nothing raised here may turn a delivered
+        email into a failure (and so into a resend)."""
+        try:
+            self.d.calllog.record(meta, outcome, providers=providers, message_id=message_id)
+        except Exception as e:
+            self.d.log(f"{meta.get('id')}: call log failed ({type(e).__name__})")
         self.d.log(f"{meta.get('id')} {meta.get('line')} {outcome} msg={message_id}")
+
+    def evict(self, keep_ids) -> None:
+        """Forget every item the spool no longer lists (acked elsewhere, removed by the operator), so
+        cached emails and WAV bytes do not accumulate. Only call it after a successful list()."""
+        keep = set(keep_ids)
+        for state in (self.sent_pending_ack, self.pending_send, self.failures):
+            for item_id in [i for i in state if i not in keep]:
+                del state[item_id]
+        self.send_failed_logged &= keep
+        self.giveup_alert_pending &= keep
 
     def _deliver(self, item_id, pending: Pending) -> str:
         self.pending_send[item_id] = pending
@@ -172,8 +187,9 @@ class Processor:
                 self._log_call(pending.meta, "send-failed", providers=pending.providers)
             return "retry"
         self.pending_send.pop(item_id, None)
-        self._log_call(pending.meta, pending.outcome, providers=pending.providers, message_id=message_id)
+        # Recorded first: from here on the item may only ever be acked, never resent.
         self.sent_pending_ack[item_id] = (pending.meta, message_id)
+        self._log_call(pending.meta, pending.outcome, providers=pending.providers, message_id=message_id)
         # The email is now delivered - any pre-delivery pipeline/send failure count must not leak
         # into ack-only retries, which are a different failure mode with their own accounting.
         self.failures.pop(item_id, None)
@@ -231,27 +247,29 @@ class Processor:
         the on-disk work directory may be long gone. Otherwise it is built from `wav`, falling back
         to the item's own work directory in case a wav was already fetched there before the error
         that triggered give-up (e.g. get() failed after downloading audio but before parsing meta)."""
-        meta = meta if isinstance(meta, dict) else {}
-        line = self.d.cfg.line(meta.get("line")) or self.d.cfg.lines[0]
-        safe = {"id": item_id}
-        for key in ("line", "did", "caller", "started_at", "duration_s"):
-            safe[key] = " ".join(str(meta.get(key, "?")).split())[:64] or "?"
-        if attachments is None:
-            if wav is None:
-                candidate = Path(self.d.cfg.paths.work_dir) / item_id / f"{item_id}.wav"
-                wav = candidate if candidate.is_file() else None
-            attachments = ((Path(wav).name, Path(wav).read_bytes(), "audio/wav"),) \
-                if wav is not None and Path(wav).is_file() else ()
-        self.pending_send.pop(item_id, None)
-        self.giveup_alert_pending.add(item_id)
+        # Reset first, before anything that can raise: a failed give-up must not leave the counter at
+        # the limit, or every following cycle would give up again. The next attempt counts from 1.
         self.failures.pop(item_id, None)
-        pending = Pending(safe, "fallback-failed-repeatedly", line.mailbox,
-                          render.fallback(line, safe, None, "processing failed repeatedly"), attachments)
+        self.pending_send.pop(item_id, None)
         try:
+            meta = meta if isinstance(meta, dict) else {}
+            line = self.d.cfg.line(meta.get("line")) or self.d.cfg.lines[0]
+            safe = {"id": item_id}
+            for key in ("line", "did", "caller", "started_at", "duration_s"):
+                safe[key] = " ".join(str(meta.get(key, "?")).split())[:64] or "?"
+            if attachments is None:
+                if wav is None:
+                    candidate = Path(self.d.cfg.paths.work_dir) / item_id / f"{item_id}.wav"
+                    wav = candidate if candidate.is_file() else None
+                attachments = ((Path(wav).name, Path(wav).read_bytes(), "audio/wav"),) \
+                    if wav is not None and Path(wav).is_file() else ()
+            pending = Pending(safe, "fallback-failed-repeatedly", line.mailbox,
+                              render.fallback(line, safe, None, "processing failed repeatedly"), attachments)
+            self.giveup_alert_pending.add(item_id)
             return self._deliver(item_id, pending)
         except Exception as e:
-            # Safety net only: _deliver already handles SendError itself. Anything else escaping
-            # it here (e.g. the fallback send raising a non-SendError error too) must not crash
-            # process() - leave it to be retried like any other pending send.
+            # _deliver handles SendError itself. Anything else (reading the WAV, rendering, a
+            # non-SendError from the fallback send) must not crash process(): the item stays in the
+            # spool and is retried from scratch, reaching give-up again only after max_failures more.
             self.d.log(f"{item_id}: give-up delivery failed unexpectedly, will retry: {type(e).__name__}")
             return "retry"

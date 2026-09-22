@@ -6,7 +6,7 @@ import stat
 from pathlib import Path
 
 from .base import ID_RE, Item, SpoolError, check_meta
-from .vm_spool import list_ready
+from .vm_spool import count_orphans, list_ready
 
 
 def _read_regular(path: Path) -> bytes | None:
@@ -27,13 +27,20 @@ def _read_regular(path: Path) -> bytes | None:
 
 class LocalSpool:
     def __init__(self, root):
-        self.ready = Path(root) / "ready"
+        self.root = Path(root)
+        self.ready = self.root / "ready"
 
     def list(self) -> list[Item]:
         try:
             return [Item(ident, mtime, has_audio) for mtime, ident, has_audio in list_ready(self.ready)]
         except OSError as e:
             raise SpoolError(f"list: {type(e).__name__}") from None
+
+    def orphans(self) -> int:
+        try:
+            return count_orphans(self.root)
+        except OSError as e:
+            raise SpoolError(f"orphans: {type(e).__name__}") from None
 
     def get(self, item_id, dest):
         if not ID_RE.fullmatch(item_id):

@@ -25,6 +25,8 @@ class Spool(Protocol):
 
     def ack(self, item_id: str) -> None: ...
 
+    def orphans(self) -> int: ...
+
 
 def check_meta(meta, item_id: str) -> dict:
     """Content problems raise ValueError so a broken item ends in the poison-item path."""

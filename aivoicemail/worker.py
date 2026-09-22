@@ -12,6 +12,8 @@ from .mail import Mailer
 from .processor import Deps
 from .spool import SpoolError, build_spool
 
+ORPHAN_CHECK_SECONDS = 600  # orphaned-audio scan interval (an extra SSH round trip in split mode)
+
 
 def build(cfg, env, *, fake=False, log=print):
     closers = []
@@ -46,13 +48,20 @@ def build(cfg, env, *, fake=False, log=print):
 def run(deps, processor, *, once=False, sleep=time.sleep):
     label = "SSH failure" if deps.cfg.spool.backend == "ssh" else "directory missing or unreadable"
     last_ok = deps.clock()
+    orphans, last_orphan_check = 0, None
     while True:
-        items = []
+        items, listed = [], False
         try:
             items = deps.spool.list()
             last_ok = deps.clock()
+            listed = True
         except SpoolError as e:
             deps.log(f"list failed: {e}")
+        if listed:
+            processor.evict(item.id for item in items)
+            if last_orphan_check is None or last_ok - last_orphan_check >= ORPHAN_CHECK_SECONDS:
+                last_orphan_check = last_ok
+                orphans = _orphans(deps)
         waiting = []  # items still in the spool after this cycle; acked ones cannot be stale
         for item in items:
             try:
@@ -61,8 +70,21 @@ def run(deps, processor, *, once=False, sleep=time.sleep):
             except Exception as e:  # never let one item stop the loop
                 deps.log(f"{item.id}: unexpected {type(e).__name__}")
                 waiting.append(item)
-        deps.alerter.check(waiting, last_list_ok=last_ok, now=deps.clock(), spool_label=label)
+        deps.alerter.check(waiting, last_list_ok=last_ok, now=deps.clock(), spool_label=label, orphans=orphans)
         deps.calllog.prune()
         if once:
             return
         sleep(deps.cfg.worker.poll_seconds)
+
+
+def _orphans(deps) -> int:
+    """Number of orphaned audio files in the spool (0 when the backend cannot tell)."""
+    scan = getattr(deps.spool, "orphans", None)
+    if scan is None:
+        return 0
+    try:
+        return scan()
+    except Exception as e:
+        deps.log(f"orphan check failed: {type(e).__name__}: {e}" if isinstance(e, SpoolError)
+                 else f"orphan check failed: {type(e).__name__}")
+        return 0

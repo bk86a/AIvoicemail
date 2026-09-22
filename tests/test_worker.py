@@ -11,8 +11,14 @@ ID2 = "11111111-2222-4333-8444-555555555555"
 
 
 class ListSpool:
-    def __init__(self, items, error=None):
-        self.items, self.error = items, error
+    def __init__(self, items, error=None, orphans=0):
+        self.items, self.error, self.orphan_count, self.orphan_calls = items, error, orphans, 0
+
+    def orphans(self):
+        self.orphan_calls += 1
+        if isinstance(self.orphan_count, Exception):
+            raise self.orphan_count
+        return self.orphan_count
 
     def list(self):
         if self.error:
@@ -24,8 +30,9 @@ class Recorder:
     def __init__(self):
         self.checks, self.prunes = [], 0
 
-    def check(self, waiting, *, last_list_ok, now, spool_label):
+    def check(self, waiting, *, last_list_ok, now, spool_label, orphans=0):
         self.checks.append((list(waiting), last_list_ok, now, spool_label))
+        self.orphans = orphans
 
     def prune(self):
         self.prunes += 1
@@ -46,7 +53,10 @@ class Deps:
 
 class FakeProcessor:
     def __init__(self, results):
-        self.results, self.seen = results, []
+        self.results, self.seen, self.evicted = results, [], []
+
+    def evict(self, keep_ids):
+        self.evicted.append(set(keep_ids))
 
     def process(self, item):
         self.seen.append(item.id)
@@ -78,6 +88,29 @@ def test_retry_items_are_waiting_acked_are_not(cfg):
     d = Deps(cfg, ListSpool([Item(ID1, 0, True), Item(ID2, 0, True)]), [1, 2, 3])
     worker.run(d, FakeProcessor({ID1: "retry", ID2: "acked"}), once=True)
     assert [i.id for i in d.alerter.checks[0][0]] == [ID1]
+
+
+def test_state_evicted_only_after_a_successful_list(cfg):
+    d = Deps(cfg, ListSpool([Item(ID1, 0, True)]), [1, 2, 3])
+    p = FakeProcessor({ID1: "retry"})
+    worker.run(d, p, once=True)
+    assert p.evicted == [{ID1}]
+    d = Deps(cfg, ListSpool([], error=SpoolError("gone")), [1, 2])
+    p = FakeProcessor({})
+    worker.run(d, p, once=True)
+    assert p.evicted == []
+
+
+def test_orphans_passed_to_the_alerter_and_scan_failures_logged(cfg):
+    d = Deps(cfg, ListSpool([], orphans=3), [1, 2, 3])
+    worker.run(d, FakeProcessor({}), once=True)
+    assert d.alerter.orphans == 3
+    d = Deps(cfg, ListSpool([], orphans=SpoolError("orphans: exit 2")), [1, 2, 3])
+    worker.run(d, FakeProcessor({}), once=True)
+    assert d.alerter.orphans == 0 and any("orphan check failed" in l for l in d.logs)
+    d = Deps(cfg, ListSpool([], error=SpoolError("gone"), orphans=3), [1, 2, 3])
+    worker.run(d, FakeProcessor({}), once=True)
+    assert d.spool.orphan_calls == 0
 
 
 def test_loop_sleeps_poll_seconds(cfg):

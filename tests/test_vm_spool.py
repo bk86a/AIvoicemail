@@ -83,3 +83,36 @@ def test_rejects_other_commands_and_bad_ids(tmp_path):
 def test_argv_mode_for_local_use(tmp_path):
     make(tmp_path)
     assert run(tmp_path, "list", via_ssh=False).returncode == 0
+
+
+def test_orphans_counts_old_tmp_files_and_wavs_without_metadata(tmp_path):
+    from aivoicemail.spool.vm_spool import count_orphans
+    make(tmp_path)  # complete item: never an orphan, however old
+    (tmp_path / "tmp").mkdir()
+    old, now = 1_700_000_000, 1_700_000_000 + 3601
+    for path in (tmp_path / "tmp" / "a.wav", tmp_path / "tmp" / "b.wav",
+                 tmp_path / "ready" / "1f8fad5b-d9cb-469f-a165-70867728950e.wav"):
+        path.write_bytes(b"RIFF")
+        os.utime(path, (old, old))
+    os.utime(tmp_path / "ready" / f"{ID}.wav", (old, old))
+    fresh = tmp_path / "tmp" / "recording-now.wav"
+    fresh.write_bytes(b"RIFF")
+    os.utime(fresh, (now - 60, now - 60))
+    assert count_orphans(tmp_path, now=now) == 3
+    assert count_orphans(tmp_path, now=old + 3599) == 0
+
+
+def test_orphans_missing_tmp_dir_is_zero(tmp_path):
+    from aivoicemail.spool.vm_spool import count_orphans
+    make(tmp_path)
+    assert count_orphans(tmp_path) == 0
+
+
+def test_orphans_command(tmp_path):
+    make(tmp_path)
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "x.wav").write_bytes(b"RIFF")
+    os.utime(tmp_path / "tmp" / "x.wav", (1, 1))
+    r = run(tmp_path, "orphans")
+    assert r.returncode == 0 and r.stdout == b"1\n"
+    assert run(tmp_path, "orphans 5").returncode == 2

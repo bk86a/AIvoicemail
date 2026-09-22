@@ -554,3 +554,158 @@ def test_transcribe_retries_then_first_ack_failure_does_not_duplicate_the_email(
     assert len(sends) == 1
     assert sends[0]["to"] == "info@acme.example"
     assert sp.acked == [ID] and sp.ack_calls == 2
+
+
+class ExplodingCallLog:
+    """calllog.record raising something other than the OSError CallLog handles itself."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def record(self, *a, **kw):
+        self.calls += 1
+        raise RuntimeError("call log exploded +32470123456")
+
+
+def test_call_log_exception_after_send_never_resends(cfg):
+    sends, logs = [], []
+    sp = FakeSpool(meta())
+    p = make(cfg, sp, sends, logs=logs, transcribe=ok_transcribe, summarise=ok_summarise)
+    p.d.calllog = ExplodingCallLog()
+    assert p.process(Item(ID, 0, True)) == "acked"
+    assert len(sends) == 1 and sp.acked == [ID]
+    assert any("call log failed (RuntimeError)" in l for l in logs)
+    assert not any("+32470123456" in l for l in logs)
+
+
+def test_call_log_exception_with_ack_failure_retries_ack_only(cfg):
+    sends = []
+    sp = FakeSpool(meta(), ack_error=OSError("gone"))
+    p = make(cfg, sp, sends, transcribe=ok_transcribe, summarise=ok_summarise)
+    p.d.calllog = ExplodingCallLog()
+    for _ in range(7):
+        assert p.process(Item(ID, 0, True)) == "retry"
+    sp.ack_error = None
+    assert p.process(Item(ID, 0, True)) == "acked"
+    assert [s["to"] for s in sends].count("info@acme.example") == 1
+
+
+def test_give_up_render_failure_does_not_escape_and_restarts_the_count(cfg, monkeypatch):
+    sends, logs = [], []
+    p = make(cfg, FakeSpool(meta(line="xx")), sends, logs=logs)
+    monkeypatch.setattr(processor.render, "fallback", lambda *a: (_ for _ in ()).throw(ValueError("bad")))
+    results = [p.process(Item(ID, 0, True)) for _ in range(5)]
+    assert results == ["retry"] * 5 and sends == []
+    assert any("give-up delivery failed unexpectedly, will retry: ValueError" in l for l in logs)
+    assert ID not in p.failures  # the next cycle counts from 1 again, not an instant give-up
+    assert p.process(Item(ID, 0, True)) == "retry"
+    assert p.failures[ID] == 1
+
+
+def test_give_up_attachment_read_failure_does_not_escape(cfg, monkeypatch):
+    sends = []
+    p = make(cfg, FakeSpool(meta(line="xx")), sends)
+    real = processor.Path.read_bytes
+
+    def read_bytes(self):
+        if self.suffix == ".wav":
+            raise PermissionError("denied")
+        return real(self)
+
+    monkeypatch.setattr(processor.Path, "read_bytes", read_bytes)
+    results = [p.process(Item(ID, 0, True)) for _ in range(5)]
+    assert results == ["retry"] * 5 and sends == [] and ID not in p.failures
+
+
+def test_evict_forgets_items_no_longer_in_the_spool(cfg):
+    sp = FakeSpool(meta(), ack_error=SpoolError("net"))
+    p = make(cfg, sp, [], transcribe=ok_transcribe, summarise=ok_summarise)
+    p.process(Item(ID, 0, True))
+    assert ID in p.sent_pending_ack
+    p.pending_send[ID2] = object()
+    p.failures[ID2] = 3
+    p.send_failed_logged.add(ID2)
+    p.giveup_alert_pending.add(ID2)
+    p.evict({ID})
+    assert ID in p.sent_pending_ack
+    assert ID2 not in p.pending_send and ID2 not in p.failures
+    assert ID2 not in p.send_failed_logged and ID2 not in p.giveup_alert_pending
+    p.evict(set())
+    assert not (p.sent_pending_ack or p.pending_send or p.failures or p.send_failed_logged
+                or p.giveup_alert_pending)
+
+
+FUZZ_FAULTS = ("get_value", "get_spool", "speech", "transcribe_raise", "transcribe_none", "summarise_raise",
+               "summarise_none", "send_senderror", "send_other", "ack_spool", "ack_other", "calllog")
+
+
+def test_fuzz_never_sends_two_mailbox_emails(cfg):
+    """Random faults at every step, many cycles: an item never reaches its mailbox twice, and once
+    acked it reached it exactly once (Task 8 invariant)."""
+    import random
+    rng = random.Random(20260922)
+    for run in range(400):
+        rate = rng.choice((0.1, 0.3, 0.6))
+        fault = lambda name: rng.random() < rate and rng.random() < 0.5 + 0.5 * (name in chosen)
+        chosen = set(rng.sample(FUZZ_FAULTS, 3))
+        delivered = []
+
+        class Spool(FakeSpool):
+            def get(self, item_id, dest):
+                if fault("get_value"):
+                    raise ValueError("bad json")
+                if fault("get_spool"):
+                    raise SpoolError("net")
+                return super().get(item_id, dest)
+
+            def ack(self, item_id):
+                if fault("ack_spool"):
+                    raise SpoolError("net")
+                if fault("ack_other"):
+                    raise OSError("disk")
+                self.acked.append(item_id)
+
+        class Speech:
+            def speech_seconds(self, p):
+                if fault("speech"):
+                    raise RuntimeError("onnx")
+                return 10.0
+
+        class Log:
+            def record(self, *a, **kw):
+                if fault("calllog"):
+                    raise RuntimeError("log")
+
+        def transcribe(*a):
+            if fault("transcribe_raise"):
+                raise RuntimeError("stt")
+            return None if fault("transcribe_none") else ("Goedendag", "whisper_local")
+
+        def summarise(*a):
+            if fault("summarise_raise"):
+                raise RuntimeError("llm")
+            return None if fault("summarise_none") else (GOOD, "primary")
+
+        def send(**kw):
+            if fault("send_senderror"):
+                raise SendError("down")
+            if fault("send_other"):
+                raise UnicodeEncodeError("ascii", "x", 0, 1, "boom")
+            delivered.append(kw["to"])
+            return "MID"
+
+        sp = Spool(meta())
+        d = Deps(cfg=cfg, spool=sp, speech=Speech(), transcribe=transcribe, summarise=summarise, send=send,
+                 calllog=Log(), log=lambda m: None, clock=lambda: 1000.0)
+        d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to, log=lambda m: None)
+        p = Processor(d)
+        for _ in range(60):
+            try:
+                if p.process(Item(ID, 0, True)) == "acked":
+                    break
+            except Exception:
+                pass  # the worker loop catches these; state must stay consistent
+        mailbox = [t for t in delivered if t != cfg.mail.alert_to]
+        assert len(mailbox) <= 1, (run, chosen, mailbox)
+        if sp.acked:
+            assert len(mailbox) == 1, (run, chosen)

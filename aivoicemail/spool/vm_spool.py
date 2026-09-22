@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""vm-spool: SSH forced command giving the worker `list`, `get <uuid>`, `ack <uuid>` on the spool.
+"""vm-spool: SSH forced command giving the worker `list`, `get <uuid>`, `ack <uuid>` and `orphans`
+(a count of orphaned audio files, see count_orphans) on the spool.
 
 Install on the telephony host as /usr/local/bin/vm-spool and pin the worker's key in
 ~aivm-spool/.ssh/authorized_keys:
@@ -11,13 +12,38 @@ import re
 import stat
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+ORPHAN_SECONDS = 3600
+
+
+def spool_dir() -> Path:
+    return Path(os.environ.get("VM_SPOOL", "/srv/aivoicemail/spool"))
 
 
 def ready_dir() -> Path:
-    return Path(os.environ.get("VM_SPOOL", "/srv/aivoicemail/spool")) / "ready"
+    return spool_dir() / "ready"
+
+
+def count_orphans(spool: Path, now=None, max_age=ORPHAN_SECONDS) -> int:
+    """Regular files in tmp/ (a recording is moved out when the call ends) and WAVs in ready/ without
+    their JSON, older than max_age seconds. Counted only, never deleted: the operator decides.
+
+    Raises OSError when ready/ is missing or unreadable; a missing tmp/ counts as empty."""
+    now = time.time() if now is None else now
+    old = lambda entry: entry.is_file(follow_symlinks=False) and now - entry.stat(follow_symlinks=False).st_mtime > max_age
+    with os.scandir(spool / "ready") as it:
+        ready = {e.name: e for e in it}
+    count = sum(1 for name, e in ready.items()
+                if name.endswith(".wav") and f"{name[:-4]}.json" not in ready and old(e))
+    try:
+        with os.scandir(spool / "tmp") as it:
+            count += sum(1 for e in it if old(e))
+    except FileNotFoundError:
+        pass
+    return count
 
 
 def list_ready(ready: Path) -> list[tuple[int, str, bool]]:
@@ -54,6 +80,14 @@ def cmd_list() -> None:
         print(f"{ident} {mtime} {int(has_audio)}")
 
 
+def cmd_orphans() -> None:
+    try:
+        print(count_orphans(spool_dir()))
+    except OSError:
+        print("spool unavailable", file=sys.stderr)
+        sys.exit(4)
+
+
 def cmd_get(ident: str) -> None:
     ready = ready_dir()
     meta = ready / f"{ident}.json"
@@ -77,6 +111,8 @@ def main() -> None:
     words = raw.split(" ") if raw is not None else sys.argv[1:]
     if words == ["list"]:
         cmd_list()
+    elif words == ["orphans"]:
+        cmd_orphans()
     elif len(words) == 2 and words[0] in ("get", "ack") and ID_RE.fullmatch(words[1]):
         (cmd_get if words[0] == "get" else cmd_ack)(words[1])
     else:

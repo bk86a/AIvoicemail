@@ -72,3 +72,16 @@ def test_bad_ids_rejected(tmp_path):
 
 def test_build_spool_local(cfg):
     assert isinstance(build_spool(cfg), LocalSpool)
+
+
+def test_orphans(tmp_path):
+    make(tmp_path)
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "x.wav").write_bytes(b"RIFF")
+    os.utime(tmp_path / "tmp" / "x.wav", (1, 1))
+    assert LocalSpool(tmp_path).orphans() == 1
+
+
+def test_orphans_unreadable_spool_is_spool_error(tmp_path):
+    with pytest.raises(SpoolError):
+        LocalSpool(tmp_path / "nope").orphans()

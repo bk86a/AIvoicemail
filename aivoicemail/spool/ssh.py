@@ -60,6 +60,12 @@ class SshSpool:
     def list(self) -> list[Item]:
         return parse_list(self._run("list").decode())
 
+    def orphans(self) -> int:
+        out = self._run("orphans").decode().strip()
+        if not out.isascii() or not out.isdigit():
+            raise SpoolError(f"bad orphans reply: {out[:40]!r}")
+        return int(out)
+
     def get(self, item_id, dest):
         if not ID_RE.fullmatch(item_id):
             raise SpoolError("get: bad id")

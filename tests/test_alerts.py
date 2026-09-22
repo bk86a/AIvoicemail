@@ -42,3 +42,14 @@ def test_failed_alert_send_is_retried_next_time():
     a = make(sent, fail=True)
     assert a.notify("stale", "x", 100) is False
     assert a.last_sent == {}
+
+
+def test_orphan_alert_without_personal_data_once_per_hour():
+    sent = []
+    a = make(sent)
+    for now in (4000, 4100):
+        a.check([], last_list_ok=now, now=now, spool_label="x", orphans=2)
+    a.check([], last_list_ok=4200, now=4200, spool_label="x", orphans=0)
+    assert [s["subject"] for s in sent] == ["[Voicemail alert] stale orphan"]
+    assert sent[0]["text"].startswith("2 orphaned audio or temporary file(s) older than 60 min")
+    assert "not deleted" in sent[0]["text"]

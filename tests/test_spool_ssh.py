@@ -104,3 +104,11 @@ def test_oserror_from_runner_is_spool_error(tmp_path):
         raise OSError("fork failed")
     with pytest.raises(SpoolError):
         ssh.SshSpool("t", tmp_path / "k", tmp_path / "h", runner=runner).list()
+
+
+def test_orphans(tmp_path):
+    runner = lambda args, capture_output, timeout: subprocess.CompletedProcess(args, 0, b"2\n", b"")
+    assert ssh.SshSpool("t", tmp_path / "k", tmp_path / "h", runner=runner).orphans() == 2
+    bad = lambda args, capture_output, timeout: subprocess.CompletedProcess(args, 0, b"lots\n", b"")
+    with pytest.raises(SpoolError):
+        ssh.SshSpool("t", tmp_path / "k", tmp_path / "h", runner=bad).orphans()
