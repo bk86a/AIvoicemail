@@ -480,3 +480,77 @@ def test_send_failed_logged_only_once_per_item_even_after_giveup(cfg):
     assert "acked" in results
     outcomes = [c["outcome"] for c in calls(cfg)]
     assert outcomes.count("send-failed") == 1
+
+
+class OnceFlakyAckSpool(FakeSpool):
+    """Delivers normally but fails the very first ack() call with a non-SpoolError, then succeeds."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.ack_calls = 0
+
+    def ack(self, item_id):
+        self.ack_calls += 1
+        if self.ack_calls == 1:
+            raise OSError("disk gone")
+        self.acked.append(item_id)
+
+
+def test_send_retries_then_first_ack_failure_does_not_duplicate_the_email(cfg):
+    """Regression (repro A): send raises an unexpected error 4x (priming the failure counter close
+    to the give-up limit), the 5th send succeeds, and then - on that same successful delivery - the
+    very first ack() call raises a non-SpoolError. That must never be misread as a fifth send/pipeline
+    failure and must never trigger give-up's duplicate fallback email."""
+    sends = []
+    send_attempts = []
+
+    def send(**kw):
+        send_attempts.append(1)
+        if len(send_attempts) <= 4:
+            raise UnicodeEncodeError("ascii", "x", 0, 1, "boom")
+        sends.append(kw)
+        return "MID"
+
+    sp = OnceFlakyAckSpool(meta())
+    d = Deps(cfg=cfg, spool=sp, speech=FakeSpeech(), transcribe=ok_transcribe, summarise=ok_summarise,
+             send=send, calllog=CallLog(cfg.paths.data_dir / "calllog", 90))
+    d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to)
+    p = Processor(d)
+    for _ in range(4):
+        assert p.process(Item(ID, 0, True)) == "retry"
+    assert p.process(Item(ID, 0, True)) == "retry"   # 5th send succeeds; the first ack then fails
+    assert p.process(Item(ID, 0, True)) == "acked"   # ack retried and succeeds
+    assert len(sends) == 1
+    assert sends[0]["to"] == "info@acme.example"
+    assert sp.acked == [ID] and sp.ack_calls == 2
+
+
+def test_transcribe_retries_then_first_ack_failure_does_not_duplicate_the_email(cfg):
+    """Regression (repro B): the same scenario as above, but the pre-delivery failures come from
+    the pipeline (transcribe) rather than from send() itself, so delivery happens via process()'s
+    main path rather than the pending_send short-circuit."""
+    sends = []
+    transcribe_attempts = []
+
+    def transcribe(wav, lang, candidates):
+        transcribe_attempts.append(1)
+        if len(transcribe_attempts) <= 4:
+            raise RuntimeError("stt exploded")
+        return "Goedendag", "whisper_local"
+
+    def send(**kw):
+        sends.append(kw)
+        return "MID"
+
+    sp = OnceFlakyAckSpool(meta())
+    d = Deps(cfg=cfg, spool=sp, speech=FakeSpeech(), transcribe=transcribe, summarise=ok_summarise,
+             send=send, calllog=CallLog(cfg.paths.data_dir / "calllog", 90))
+    d.alerter = Alerter(send=lambda **kw: d.send(**kw), alert_to=cfg.mail.alert_to)
+    p = Processor(d)
+    for _ in range(4):
+        assert p.process(Item(ID, 0, True)) == "retry"
+    assert p.process(Item(ID, 0, True)) == "retry"   # pipeline+send succeed; the first ack then fails
+    assert p.process(Item(ID, 0, True)) == "acked"   # ack retried and succeeds
+    assert len(sends) == 1
+    assert sends[0]["to"] == "info@acme.example"
+    assert sp.acked == [ID] and sp.ack_calls == 2

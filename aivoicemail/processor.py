@@ -66,6 +66,11 @@ class Processor:
             self.d.log(f"{item.id}: spool error: {e}")
             return "retry"
         except Exception as e:
+            # A delivered item (already sitting in sent_pending_ack) must never reach give-up, no
+            # matter how this exception got here - checked fresh, at the moment of the exception,
+            # not from a flag computed before the pipeline ran (it may have just been delivered).
+            if item.id in self.sent_pending_ack:
+                return self._ack_failed(item.id, e)
             count = self._bump_failures(item.id, e)
             if count < self.d.cfg.worker.max_failures:
                 return "retry"
@@ -78,29 +83,35 @@ class Processor:
         self.d.log(f"{item_id}: processing failed ({type(exc).__name__}), attempt {count}/{self.d.cfg.worker.max_failures}")
         return count
 
+    def _ack_failed(self, item_id, exc) -> str:
+        """The email for this item was already delivered - an ack failure (of any kind) must never
+        cause a resend. Keep retrying the ack forever; alert the operator once (no personal data)
+        if it reaches max_failures."""
+        count = self.failures[item_id] = self.failures.get(item_id, 0) + 1
+        limit = self.d.cfg.worker.max_failures
+        self.d.log(f"{item_id}: ack failed, will retry ack only ({type(exc).__name__}), attempt {count}/{limit}")
+        if count == limit:
+            self._alert_ack_failing(item_id)
+        return "retry"
+
     def _retry_saved(self, item_id, fn) -> str:
         """Re-run a cached ack-only or send-only retry under the same failure accounting as a fresh
         attempt, so an unexpected (non-SpoolError/SendError) exception from it can't retry forever
         without ever reaching the give-up threshold.
 
-        The ack-only case (item_id already in sent_pending_ack) is different: the email was already
-        delivered successfully, so it must NEVER be resent - not even via give-up's fallback email.
-        It is retried forever; once failures reach max_failures a single best-effort "ack failing"
-        alert is raised (no personal data) and it keeps being retried."""
-        is_ack_only = item_id in self.sent_pending_ack
+        The ack-only case (item_id already in sent_pending_ack, checked fresh at exception time, not
+        from a flag computed before fn() ran) is different: the email was already delivered
+        successfully, so it must NEVER be resent - not even via give-up's fallback email."""
         try:
             result = fn()
         except SpoolError as e:
             self.d.log(f"{item_id}: spool error: {e}")
             return "retry"
         except Exception as e:
+            if item_id in self.sent_pending_ack:
+                return self._ack_failed(item_id, e)
             count = self._bump_failures(item_id, e)
-            limit = self.d.cfg.worker.max_failures
-            if is_ack_only:
-                if count == limit:
-                    self._alert_ack_failing(item_id)
-                return "retry"
-            if count < limit:
+            if count < self.d.cfg.worker.max_failures:
                 return "retry"
             pending = self.pending_send.pop(item_id, None)
             meta = pending.meta if pending is not None else {"id": item_id}
@@ -163,6 +174,9 @@ class Processor:
         self.pending_send.pop(item_id, None)
         self._log_call(pending.meta, pending.outcome, providers=pending.providers, message_id=message_id)
         self.sent_pending_ack[item_id] = (pending.meta, message_id)
+        # The email is now delivered - any pre-delivery pipeline/send failure count must not leak
+        # into ack-only retries, which are a different failure mode with their own accounting.
+        self.failures.pop(item_id, None)
         if item_id in self.giveup_alert_pending:
             self.giveup_alert_pending.discard(item_id)
             self._alert_giveup(item_id)
@@ -199,9 +213,10 @@ class Processor:
     def _ack(self, item_id, *, retry=False) -> str:
         try:
             self.d.spool.ack(item_id)
-        except SpoolError as e:
-            self.d.log(f"{item_id}: ack failed, will retry ack only: {e}")
-            return "retry"
+        except Exception as e:
+            # Any exception here (not just SpoolError) is an ack failure, never a send failure: the
+            # email was already delivered, so this must never escalate to give-up's resend.
+            return self._ack_failed(item_id, e)
         meta, message_id = self.sent_pending_ack.pop(item_id, ({"id": item_id}, None))
         self.send_failed_logged.discard(item_id)
         if retry:
