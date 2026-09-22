@@ -34,6 +34,17 @@ def _check(pattern: re.Pattern, value: str, what: str) -> str:
     return value
 
 
+def _check_range(value: str, what: str) -> str:
+    """Charset+format check for a signalling/media/local_net range. config.load's own
+    ipaddress.ip_network(value, strict=True) accepts a bare address with no "/prefix" (e.g. a
+    single SBC IP) as an implicit host route, so append /32 or /128 here for the check only - the
+    original (still bare) string is what actually gets written out."""
+    candidate = value if "/" in value else value + ("/128" if ":" in value else "/32")
+    if not _CIDR_RE.fullmatch(candidate):
+        raise ValueError(f"generate: refusing to interpolate invalid {what}: {value!r}")
+    return value
+
+
 def _check_port(value: int, what: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or not 0 < value < 65536:
         raise ValueError(f"generate: refusing to interpolate invalid {what}: {value!r}")
@@ -44,11 +55,11 @@ def pjsip_trunk(cfg) -> str:
     t = cfg.trunk
     _check(_BIND_RE, t.bind, "trunk.bind")
     for rng in t.signalling_ranges:
-        _check(_CIDR_RE, rng, "trunk.signalling_ranges")
+        _check_range(rng, "trunk.signalling_ranges")
     if t.public_ip:
         _check(_HOST_RE, t.public_ip, "trunk.public_ip")
     if t.local_net:
-        _check(_CIDR_RE, t.local_net, "trunk.local_net")
+        _check_range(t.local_net, "trunk.local_net")
     if t.media_address:
         _check(_HOST_RE, t.media_address, "trunk.media_address")
     out = [HEADER, "", "[transport-udp]", "type = transport", "protocol = udp", f"bind = {t.bind}"]
@@ -125,8 +136,10 @@ def _split(ranges):
 
 
 def nftables(cfg) -> str:
-    for rng in (*cfg.trunk.signalling_ranges, *cfg.trunk.media_ranges):
-        _check(_CIDR_RE, rng, "trunk range")
+    for rng in cfg.trunk.signalling_ranges:
+        _check_range(rng, "trunk.signalling_ranges")
+    for rng in cfg.trunk.media_ranges:
+        _check_range(rng, "trunk.media_ranges")
     _check_port(cfg.trunk.sip_port, "trunk.sip_port")
     for p in (*cfg.firewall.allow_tcp, *cfg.firewall.allow_udp):
         _check_port(p, "firewall port")

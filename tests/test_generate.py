@@ -87,6 +87,50 @@ def test_nftables_rejects_invalid_cidr(example_cfg):
         generate.nftables(cfg)
 
 
+@pytest.mark.parametrize("field", ["signalling_ranges", "media_ranges", "local_net"])
+def test_bare_ip_range_is_not_rejected(example_cfg, field):
+    """A bare IP (no /prefix), e.g. a single SBC address, is config-valid (ipaddress.ip_network
+    treats it as an implicit host route) so generate's re-check must not reject it either."""
+    kwargs = {field: "46.19.208.1"} if field == "local_net" else {field: ("46.19.208.1",)}
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(example_cfg.trunk, **kwargs))
+    generate.pjsip_trunk(cfg)  # must not raise
+    if field != "local_net":
+        generate.nftables(cfg)  # must not raise
+
+
+def test_pjsip_trunk_bare_ip_signalling_range_keeps_bare_match(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(
+        example_cfg.trunk, signalling_ranges=("46.19.208.1",)))
+    assert "match = 46.19.208.1\n" in generate.pjsip_trunk(cfg)
+
+
+def test_nftables_bare_ip_signalling_range_becomes_slash_32(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(
+        example_cfg.trunk, signalling_ranges=("46.19.208.1",), media_ranges=("46.19.208.1",)))
+    assert "46.19.208.1/32" in generate.nftables(cfg)
+
+
+def test_bare_ipv6_range_normalises_to_slash_128(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(
+        example_cfg.trunk, signalling_ranges=("2001:db8::1",), media_ranges=("2001:db8::1",)))
+    generate.pjsip_trunk(cfg)  # must not raise
+    assert "2001:db8::1/128" in generate.nftables(cfg)
+
+
+def test_nftables_signalling_range_error_names_field(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(
+        example_cfg.trunk, signalling_ranges=("46.19.208.0%evil/21",)))
+    with pytest.raises(ValueError, match="trunk.signalling_ranges"):
+        generate.nftables(cfg)
+
+
+def test_nftables_media_range_error_names_field(example_cfg):
+    cfg = dataclasses.replace(example_cfg, trunk=dataclasses.replace(
+        example_cfg.trunk, media_ranges=("46.19.208.0%evil/21",)))
+    with pytest.raises(ValueError, match="trunk.media_ranges"):
+        generate.nftables(cfg)
+
+
 def test_write_all(example_cfg, tmp_path):
     paths = generate.write_all(example_cfg, tmp_path)
     assert (tmp_path / "asterisk" / "pjsip-trunk.conf") in paths
@@ -111,3 +155,26 @@ def test_render_prompts_also_generates(tmp_path):
     out = tmp_path / "gen"
     assert cli.main(["--config", str(install(tmp_path)), "render-prompts", "--engine", "placeholder", "--out", str(out)]) == 0
     assert (out / "asterisk" / "pjsip-trunk.conf").is_file() and (out / "sounds" / "vm" / "be-menu.wav").is_file()
+
+
+def _boom(cfg, out):
+    raise ValueError("generate: refusing to interpolate invalid trunk.bind: 'x'")
+
+
+def test_cli_generate_reports_generate_value_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(generate, "write_all", _boom)
+    rc = cli.main(["--config", str(install(tmp_path)), "generate", "--out", str(tmp_path / "gen")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "ERROR: generate: refusing to interpolate invalid trunk.bind" in err
+    assert "Traceback" not in err
+
+
+def test_cli_render_prompts_reports_generate_value_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(generate, "write_all", _boom)
+    rc = cli.main(["--config", str(install(tmp_path)), "render-prompts", "--engine", "placeholder",
+                   "--out", str(tmp_path / "gen")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "ERROR: generate: refusing to interpolate invalid trunk.bind" in err
+    assert "Traceback" not in err

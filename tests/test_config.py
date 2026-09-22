@@ -115,6 +115,21 @@ def test_bind_rejects_non_ascii_port_digits(tmp_path):
     assert any("bind" in p for p in problems)
 
 
+@pytest.mark.parametrize("bad_bind", [
+    "::1:5060",
+    "[192.0.2.1]:5060",
+    "[::ffff:192.0.2.1]:5060",
+    ":5060",
+    "[]:5060",
+], ids=["unbracketed_ipv6", "bracketed_ipv4", "bracketed_ipv4_mapped", "empty_host", "empty_bracketed_host"])
+def test_bind_rejects_forms_generate_cannot_emit(tmp_path, bad_bind):
+    """generate's _BIND_RE only accepts host:port (host = hex+dot, no colon) or [host]:port
+    (host = hex+colon, no dot); config must reject anything generate could not round-trip."""
+    problems = problems_for(tmp_path, '# bind = "0.0.0.0:5060"       # SIP UDP listen address',
+                            f'bind = "{bad_bind}"')
+    assert any("bind" in p for p in problems), (bad_bind, problems)
+
+
 def test_bind_accepts_bracketed_ipv6(tmp_path):
     c = load_text(tmp_path, TEXT.replace('# bind = "0.0.0.0:5060"       # SIP UDP listen address',
                                          'bind = "[2001:db8::1]:5070"', 1))

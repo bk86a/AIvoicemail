@@ -24,6 +24,13 @@ ENV_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
 # arbitrary lines into the generated Asterisk/nftables files. No '%' is allowed here, so scope
 # ids are rejected outright rather than sanitised.
 IP_CHARS_RE = re.compile(r"[0-9A-Fa-f.:/]+")
+# `bind`'s host must round-trip through generate.py's own charset checks (its _BIND_RE): an
+# unbracketed host is IPv4-only syntax (hex digits and dots, no colon) and a bracketed host is
+# IPv6-only syntax (hex digits and colons, no dot) - so a bracketed IPv4 address, an IPv4-mapped
+# IPv6 literal with embedded dots, or an unbracketed (ambiguous) IPv6 host must all be rejected
+# here even though `ipaddress` alone would accept them.
+_BIND_HOST_V4_RE = re.compile(r"[0-9A-Fa-f.]+")
+_BIND_HOST_V6_RE = re.compile(r"[0-9A-Fa-f:]+")
 LOCAL_STT = "whisper_local"
 STRUCTURED = ("json_schema", "json_object", "none")
 AUTH = ("bearer", "api-key")
@@ -302,6 +309,17 @@ def _split_bind(bind: str) -> tuple[str | None, str]:
     return host, port
 
 
+def _bind_host_ok(bracketed: bool, host: str) -> bool:
+    """host must match the charset generate.py's bind regex accepts for this form (bracketed =
+    IPv6-only syntax, unbracketed = IPv4-only syntax) and be a real address of that family."""
+    try:
+        if bracketed:
+            return bool(_BIND_HOST_V6_RE.fullmatch(host)) and bool(ipaddress.IPv6Address(host))
+        return bool(_BIND_HOST_V4_RE.fullmatch(host)) and bool(ipaddress.IPv4Address(host))
+    except ValueError:
+        return False
+
+
 def _path(root: Path, value: str | Path) -> Path:
     return root / Path(value)  # an absolute value replaces root
 
@@ -327,11 +345,10 @@ def _trunk(r: _Reader, t: dict) -> Trunk:
         r.cidr(local_net, f"{w}.local_net")
     bind = r.get(t, "bind", w, str, "0.0.0.0:5060")
     host, port = _split_bind(bind)
-    if host is None or not port.isascii() or not port.isdigit() or not 0 < int(port) < 65536:
+    if (not host or not port.isascii() or not port.isdigit() or not 0 < int(port) < 65536
+            or not _bind_host_ok(bind.startswith("["), host)):
         r.err(f"{w}.bind: {bind!r} must be host:port or [ipv6-host]:port")
         bind = "0.0.0.0:5060"
-    else:
-        r.ip(host, f"{w}.bind")
     return Trunk(
         provider=r.get(t, "provider", w, str, "generic"),
         signalling_ranges=sig, media_ranges=med or sig,

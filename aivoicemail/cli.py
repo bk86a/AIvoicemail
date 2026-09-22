@@ -44,7 +44,12 @@ def cmd_generate(args) -> int:
     from .generate import write_all
     cfg, _, _ = load_all(args)
     out = Path(args.out) if args.out else cfg.paths.generated_dir
-    for path in write_all(cfg, out):
+    try:
+        written = write_all(cfg, out)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    for path in written:
         print(f"wrote {path}")
     return 0
 
@@ -57,7 +62,11 @@ def cmd_render_prompts(args) -> int:
     if args.engine:
         cfg = dataclasses.replace(cfg, tts=dataclasses.replace(cfg.tts, engine=args.engine))
     out = Path(args.out) if args.out else cfg.paths.generated_dir
-    write_all(cfg, out)  # keep the Asterisk files in step with the prompts they reference
+    try:
+        write_all(cfg, out)  # keep the Asterisk files in step with the prompts they reference
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     try:
         written = render_all(cfg, env, out, only=args.only, log=print)
     except RenderError as e:
