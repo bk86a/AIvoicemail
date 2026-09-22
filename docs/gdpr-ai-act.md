@@ -23,8 +23,10 @@ GDPR Art. 13 layered notice). Your written privacy notice at `privacy_url` shoul
 
 - Audio: kept in the spool until the email is accepted by the mail server, processed in memory,
   then deleted. Fallback emails carry the recording as an attachment.
-- Call log: metadata only (no transcript or summary), one file per day, deleted after
-  `call_log_days` (default 90).
+- Call log: metadata only (no transcript or summary), one JSON line per call with exactly these
+  keys: `logged_at`, `id`, `line`, `did`, `caller`, `language`, `started_at`, `duration_s`,
+  `has_audio`, `outcome`, `transcribed_by`, `summarised_by`, `message_id`. One file per UTC day
+  (`calllog/calls-YYYY-MM-DD.jsonl` in the `data` volume), deleted after `call_log_days` (default 90).
 - Asterisk CDR CSV: off by default; when on, rotate it with the same retention.
 - Container logs: IDs and outcomes only, size-capped. Exception: Asterisk's SIP stack logs the
   From URI (which can hold a caller number) of a request from an unidentified source when it rejects

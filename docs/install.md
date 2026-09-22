@@ -17,8 +17,15 @@ the compose files, and it carries no secret).
 
 ## Requirements
 
-- Linux (x86_64 or arm64) with Docker Engine and Compose v2.24 or later.
-- A public IPv4 address reachable by your carrier on UDP 5060 and UDP 10000-20000.
+- Linux (x86_64 or arm64) with Docker Engine and Compose v2.24 or later, installed from Docker's own
+  apt repository ([docs.docker.com/engine/install](https://docs.docker.com/engine/install/)); the
+  distribution's `docker.io` package may ship an older Compose. The commands below run `docker`
+  without `sudo`: add your user to the `docker` group (`sudo usermod -aG docker $USER`, then log in
+  again) or prefix `docker` and `./aivm` with `sudo`. Membership of that group is root-equivalent.
+- `git` to fetch the code.
+- A public IPv4 address reachable by your carrier on UDP 5060 and UDP 10000-20000 (behind NAT:
+  forward those ports to the host and set `[trunk] public_ip` and `local_net`, see
+  [configuration.md](configuration.md#trunk)).
 - An IP-authenticated SIP trunk; see [carriers.md](carriers.md).
 - An SMTP account that may send from the configured `from` address.
 - For summaries: an OpenAI-compatible endpoint and key (Mistral, OpenAI, Azure OpenAI) or a local
@@ -67,6 +74,9 @@ the compose files, and it carries no secret).
    ./aivm render-prompts
    ```
 
+   Asterisk reads the generated files only when it starts: after re-running `render-prompts` or
+   `generate` on a running installation, `docker compose restart asterisk`.
+
 5. **Install the host firewall** - see [Host firewall](#host-firewall) below.
 
 6. **Start and test.**
@@ -82,6 +92,12 @@ the compose files, and it carries no secret).
    to exercise transcription and summary. Then call the number from a phone.
 
 ### Trying it without provider accounts
+
+Follow steps 1-3 with `.env` left empty. `./aivm check` has no fake mode: it then reports `ERROR`s
+for the unset SMTP secrets and for an `[llm]` chain without a key (and `WARNING`s for the other
+keys); those are expected here and do not block the commands below. Fix any other `ERROR`.
+`--engine placeholder` renders tone prompts without downloading voices; run `./aivm render-prompts`
+later for the real voices.
 
 ```bash
 ./aivm render-prompts --engine placeholder
@@ -206,7 +222,8 @@ AIVM_COMPOSE=deploy/compose.worker.yaml ./aivm check
 docker compose -f deploy/compose.worker.yaml up -d --build
 ```
 
-`vm-spool` accepts only `list`, `get <uuid>` and `ack <uuid>`; the worker accepts only
+`vm-spool` accepts only `list`, `get <uuid>`, `ack <uuid>` and `orphans` (a count of stale orphaned
+audio files, used for the orphan alert); the worker accepts only
 `<uuid>.json` and `<uuid>.wav` regular files from it. `test-call` needs Asterisk on the same host,
 so in split mode verify with a real call.
 

@@ -27,7 +27,8 @@ mailbox receives an email. The audio is deleted once the email has been accepted
   mail server accepted the email.
 - Transcription runs locally by default; remote providers are opt-in and skipped when their key is
   missing.
-- The call log holds metadata only (time, line, caller number, outcome, providers, message ID), is
+- The call log holds metadata only (time, line, called and caller number, language, duration,
+  outcome, providers, message ID; exact keys in [docs/gdpr-ai-act.md](docs/gdpr-ai-act.md)), is
   rotated daily and deleted after 90 days. Container logs carry IDs and outcomes, never caller numbers.
   One exception: Asterisk's SIP stack logs the From URI (which can hold a caller number) of a request
   from an unidentified source before rejecting it; the host firewall blocks such sources in normal
@@ -44,7 +45,9 @@ check that it allows your use before going live.
 
 ## Quickstart (single host)
 
-Requirements: a Linux server with a public IPv4 address, Docker Engine with Compose v2.24 or later,
+Requirements: a Linux server with a public IPv4 address, Docker Engine with Compose v2.24 or later
+(from Docker's apt repository, with your user in the `docker` group; see
+[docs/install.md](docs/install.md#requirements)),
 an IP-authenticated SIP trunk (DIDWW is documented in [docs/carriers.md](docs/carriers.md)), an SMTP
 account, and an API key for your language model (or a local one).
 
@@ -64,7 +67,10 @@ docker compose up -d
 `./aivm` runs the `aivoicemail` command inside the worker image. Before pointing your number at
 the server, install the host firewall generated in `generated/nftables/aivoicemail.nft`
 ([docs/install.md](docs/install.md#host-firewall)). To try everything without any provider account,
-start with `AIVOICEMAIL_FAKE_PROVIDERS=1 docker compose up -d` and `./aivm test-call --fake-providers`.
+start with `AIVOICEMAIL_FAKE_PROVIDERS=1 docker compose up -d` and `./aivm test-call --fake-providers`
+([docs/install.md](docs/install.md#trying-it-without-provider-accounts): `check` then reports the
+missing secrets as errors). After changing the config and re-running `render-prompts`, restart
+Asterisk (`docker compose restart asterisk`).
 
 Sizing: Whisper `large-v3` on CPU needs about 4 GB RAM and 4 cores for near-real-time
 transcription; use `small` or `medium` on small hosts, or a remote-only STT chain (no model needed).

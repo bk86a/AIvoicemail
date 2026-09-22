@@ -6,7 +6,8 @@ the process environment - a value containing `$` must be single-quoted (`KEY='pa
 Compose also reads this file for its own `${VAR}` interpolation. Relative paths resolve against the
 install root (the directory above `config/`; `/opt/aivoicemail` inside the containers). Run
 `./aivm check` after every change and `./aivm render-prompts` when lines, languages, texts or voices
-change.
+change; then `docker compose restart asterisk` (Asterisk loads the generated files at
+start) and, for worker settings, `docker compose restart worker`.
 
 ## `[company]`
 
@@ -20,8 +21,12 @@ IP-authenticated trunks only in v0.1: SIP is accepted from these ranges, everyth
 - `provider` - label only.
 - `signalling_ranges` - CIDRs the carrier sends SIP from (identify sections and firewall).
 - `media_ranges` - CIDRs the carrier sends RTP from (firewall); default: `signalling_ranges`.
-- `public_ip` - external address for SIP and SDP when the host is behind NAT.
-- `local_net` - the host's local network behind NAT (optional).
+- `public_ip` - external address for SIP and SDP when the host is behind NAT: the router's public
+  IPv4, e.g. `"203.0.113.10"`, with UDP 5060 and 10000-20000 forwarded to the host. Leave it out
+  when the host itself has the public address.
+- `local_net` - with `public_ip`: the host's own LAN subnet (e.g. `"192.168.1.0/24"`, see
+  `ip -4 addr`), so peers there are answered with the local address (optional). `127.0.0.0/8` is
+  added automatically for `test-call`.
 - `bind` - SIP UDP listen address, default `"0.0.0.0:5060"`.
 - `media_address` - bind RTP to this local address (optional).
 - `allow_local_test` - identify `127.0.0.1` as the trunk so `aivoicemail test-call` can call in from
