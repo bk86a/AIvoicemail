@@ -1,0 +1,11 @@
+# Nederlandse teksten. {company} en {privacy_url} komen uit de config; {digit} is de menutoets.
+# transparency: zinsdelen die elke melding moet behouden (AI-verordening art. 50, AVG art. 13).
+transparency = ["opgenomen", "geautomatiseerd systeem", "artificiële intelligentie", "{privacy_url}"]
+
+[text]
+menu_option = "Voor Nederlands, druk {digit}."
+notice = "U bent verbonden met de voicemail van {company}. Dit gesprek wordt opgenomen. Uw bericht wordt door een geautomatiseerd systeem met artificiële intelligentie uitgeschreven en samengevat, zodat wij u kunnen terugbellen. Meer informatie over de verwerking van uw gegevens vindt u op {privacy_url}. Spreek na de toon uw naam, uw telefoonnummer en uw bericht in, en haak in wanneer u klaar bent."
+notice_short = "Dit gesprek wordt opgenomen en door een geautomatiseerd systeem met artificiële intelligentie verwerkt. Informatie: {privacy_url}."
+after_tone = "Spreek na de toon."
+thanks = "Dank u, uw bericht is ontvangen. Tot ziens."
+thanks_short = "Dank u, tot ziens."

@@ -1,0 +1,11 @@
+# English prompt texts. {company} and {privacy_url} come from the config; {digit} is the menu key.
+# transparency: phrases every notice must keep (EU AI Act Art. 50, GDPR Art. 13); enforced by `aivoicemail check`.
+transparency = ["recorded", "automated system", "artificial intelligence", "{privacy_url}"]
+
+[text]
+menu_option = "For English, press {digit}."
+notice = "You have reached the voicemail of {company}. This call is recorded. Your message is transcribed and summarised by an automated system using artificial intelligence, so that we can call you back. For information on how we process your data, visit {privacy_url}. After the tone, please leave your name, phone number and message, then hang up."
+notice_short = "This call is recorded and processed by an automated system using artificial intelligence. Details: {privacy_url}."
+after_tone = "Please speak after the tone."
+thanks = "Thank you, your message has been recorded. Goodbye."
+thanks_short = "Thank you, goodbye."

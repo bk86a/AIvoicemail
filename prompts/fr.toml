@@ -1,0 +1,11 @@
+# Textes en français. {company} et {privacy_url} viennent de la configuration ; {digit} est la touche du menu.
+# transparency : éléments que chaque annonce doit conserver (règlement IA art. 50, RGPD art. 13).
+transparency = ["enregistré", "système automatisé", "intelligence artificielle", "{privacy_url}"]
+
+[text]
+menu_option = "Pour le français, appuyez sur {digit}."
+notice = "Vous êtes sur la messagerie vocale de {company}. Cet appel est enregistré. Votre message est transcrit et résumé par un système automatisé utilisant l'intelligence artificielle, afin que nous puissions vous rappeler. Pour en savoir plus sur le traitement de vos données, rendez-vous sur {privacy_url}. Après le bip, indiquez votre nom, votre numéro de téléphone et votre message, puis raccrochez."
+notice_short = "Cet appel est enregistré et traité par un système automatisé utilisant l'intelligence artificielle. Informations : {privacy_url}."
+after_tone = "Parlez après le bip."
+thanks = "Merci, votre message a bien été enregistré. Au revoir."
+thanks_short = "Merci, au revoir."

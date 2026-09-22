@@ -1,0 +1,11 @@
+# Deutsche Texte. {company} und {privacy_url} stammen aus der Konfiguration; {digit} ist die Menütaste.
+# transparency: Elemente, die jede Ansage behalten muss (KI-Verordnung Art. 50, DSGVO Art. 13).
+transparency = ["aufgezeichnet", "automatisierten System", "künstlicher Intelligenz", "{privacy_url}"]
+
+[text]
+menu_option = "Für Deutsch drücken Sie die {digit}."
+notice = "Sie sind mit der Mailbox von {company} verbunden. Dieser Anruf wird aufgezeichnet. Ihre Nachricht wird von einem automatisierten System mit künstlicher Intelligenz transkribiert und zusammengefasst, damit wir Sie zurückrufen können. Informationen zur Verarbeitung Ihrer Daten finden Sie unter {privacy_url}. Bitte nennen Sie nach dem Signalton Ihren Namen, Ihre Telefonnummer und Ihre Nachricht und legen Sie dann auf."
+notice_short = "Dieser Anruf wird aufgezeichnet und von einem automatisierten System mit künstlicher Intelligenz verarbeitet. Informationen: {privacy_url}."
+after_tone = "Bitte sprechen Sie nach dem Signalton."
+thanks = "Vielen Dank, Ihre Nachricht wurde aufgezeichnet. Auf Wiederhören."
+thanks_short = "Vielen Dank, auf Wiederhören."
