@@ -3,7 +3,7 @@
 transparency = ["nagrywana", "zautomatyzowany system", "sztuczną inteligencję", "{privacy_url}"]
 
 [text]
-menu_option = "Aby kontynuować po polsku, proszę nacisnąć {digit}."
+menu_option = "Dla języka polskiego naciśnij {digit}."
 notice = "Dodzwonili się Państwo do poczty głosowej {company}. Rozmowa jest nagrywana. Wiadomość zostanie przepisana i streszczona przez zautomatyzowany system wykorzystujący sztuczną inteligencję, co pozwoli nam szybko oddzwonić. Informacje o przetwarzaniu danych osobowych znajdą Państwo na stronie {privacy_url}. Po sygnale prosimy podać imię i nazwisko, numer telefonu oraz treść wiadomości, a następnie się rozłączyć."
 notice_short = "Rozmowa jest nagrywana i przetwarzana przez zautomatyzowany system wykorzystujący sztuczną inteligencję. Informacje: {privacy_url}."
 after_tone = "Prosimy mówić po sygnale."
