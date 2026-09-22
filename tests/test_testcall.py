@@ -54,9 +54,20 @@ def test_menu_call_uses_inband_digit_and_waits_for_outcome(cfg):
     rc = testcall.run(cfg, runner=worker_runner(cfg, seen=seen), clock=clock, sleep=clock.sleep, out=out.append)
     assert rc == 0
     cmd, scenario = seen
-    assert cmd[:2] == ["sipp", "127.0.0.1:5060"] and cmd[cmd.index("-s") + 1] == "3220000001" and "-inf" in cmd
-    assert "inband_[field0].pcap" in scenario and "telephone-event" not in scenario
+    assert cmd[:2] == ["sipp", "127.0.0.1:5060"] and cmd[cmd.index("-s") + 1] == "3220000001" and "-inf" not in cmd
+    assert "inband_1.pcap" in scenario and "[field0]" not in scenario and "telephone-event" not in scenario
     assert out[-1] == f"test-call: outcome=message message_id=<m@acme.example> item={ID}"
+
+
+def test_menu_call_digit_2_substitutes_correct_pcap(cfg):
+    rendered(cfg)
+    seen, clock = [], Clock()
+    rc = testcall.run(cfg, digit="2", runner=worker_runner(cfg, seen=seen), clock=clock, sleep=clock.sleep,
+                      out=lambda *a: None)
+    assert rc == 0
+    cmd, scenario = seen
+    assert "-inf" not in cmd
+    assert "inband_2.pcap" in scenario and "[field0]" not in scenario
 
 
 def test_single_language_line_has_no_digit(cfg):

@@ -44,3 +44,16 @@ def test_config_error_exit_code(tmp_path, capsys):
     bad.write_text("[company]\nname = 1\n")
     assert cli.main(["--config", str(bad), "worker", "--once"]) == 2
     assert "ERROR: [company].name: expected str" in capsys.readouterr().err
+
+
+def test_env_file_permission_error_exit_code(tmp_path, capsys):
+    cfg = install(tmp_path)
+    env_file = tmp_path / "install" / ".env"
+    env_file.write_text("SMTP_USER=x\n")
+    env_file.chmod(0o000)
+    try:
+        assert cli.main(["--config", str(cfg), "worker", "--once"]) == 2
+        err = capsys.readouterr().err
+        assert f"ERROR: cannot read {env_file}" in err and "Traceback" not in err
+    finally:
+        env_file.chmod(0o600)

@@ -4,4 +4,5 @@
 # Split mode (processing host): AIVM_COMPOSE=deploy/compose.worker.yaml ./aivm check
 set -eu
 cd "$(dirname "$0")"
+[ -f .env ] && [ -n "$(find .env -prune -perm -004)" ] && echo "WARNING: .env is world-readable; run: chmod 600 .env" >&2
 exec docker compose -f "${AIVM_COMPOSE:-compose.yaml}" run --rm tools "$@"

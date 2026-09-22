@@ -33,10 +33,18 @@ services:
     image: aivoicemail-worker:0.1.0
     profiles: [tools]
     network_mode: host
+    pid: host             # sipp (test-call) derives its Call-ID/branch from its own PID; as a fresh
+                         # container's PID 2 every run, a second run would reuse the first and PJSIP
+                         # would answer its BYE from the still-cached first transaction (same reason
+                         # tests/sipp/run_harness.sh runs SIPp with --pid host)
+    cap_add: [NET_RAW]   # sipp (test-call) needs a raw socket for its RTP port range checks; file
+                         # capability set on /usr/bin/sipp at build time, nothing else gains it
+    security_opt: []     # no-new-privileges would block that file capability from taking effect even
+                         # with cap_add above; safe here since the image root filesystem is read-only,
+                         # so no elevated binary can be added to it at runtime
     env_file: [../.env]
     volumes:
       - ../config:/opt/aivoicemail/config:ro
-      - ../.env:/opt/aivoicemail/.env:ro
       - ../overrides:/opt/aivoicemail/overrides:ro
       - ../generated:/opt/aivoicemail/generated
       - data:/var/lib/aivoicemail

@@ -15,7 +15,11 @@ def _truthy(value) -> bool:
 def load_all(args):
     cfg = load(args.config)
     env_file = Path(args.env_file) if args.env_file else cfg.paths.root / ".env"
-    return cfg, load_env(env_file), env_file
+    try:
+        env = load_env(env_file)
+    except PermissionError:
+        raise ConfigError([f"cannot read {env_file}"]) from None
+    return cfg, env, env_file
 
 
 def cmd_worker(args) -> int:

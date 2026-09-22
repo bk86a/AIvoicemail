@@ -36,8 +36,26 @@ def test_worker_services_share_the_hardening_anchor():
                  'user: "10001:5060"', 'max-size: "10m"'):
         assert line in anchor, line
     assert c.count("<<: *hardening") == 2
-    assert "privileged" not in c and "cap_add" not in c
+    assert "privileged" not in c
     assert "/run/aivoicemail:uid=10001,gid=5060,mode=0700" in c
+
+
+def test_only_tools_gets_net_raw_for_sipp():
+    c = text("deploy/compose.worker.yaml")
+    worker_block, tools_block = c.split("  worker:")[1].split("  tools:")
+    assert "cap_add" not in worker_block and "security_opt" not in worker_block and "pid: host" not in worker_block
+    assert "cap_add: [NET_RAW]" in tools_block
+    # no-new-privileges (from the shared anchor) is explicitly cleared for tools only: it would block
+    # the CAP_NET_RAW file capability on /usr/bin/sipp from taking effect even with cap_add above
+    assert "security_opt: []" in tools_block
+    assert '"no-new-privileges:true"' in c.split("services:")[0]  # worker still gets it via the anchor
+    # sipp's Call-ID/branch come from its own PID; a fresh container gives it the same PID every run
+    assert "pid: host" in tools_block
+
+
+def test_dockerfile_grants_sipp_raw_socket_capability():
+    d = text("Dockerfile")
+    assert "setcap cap_net_raw+ep /usr/bin/sipp" in d
 
 
 def test_single_host_includes_both():
@@ -47,7 +65,7 @@ def test_single_host_includes_both():
 
 def test_worker_dockerfile():
     d = text("Dockerfile")
-    assert re.search(r"^FROM python:3\.12-slim-bookworm@sha256:[0-9a-f]{64}$", d, re.M)
+    assert re.search(r"^FROM python:3\.12-slim-trixie@sha256:[0-9a-f]{64}$", d, re.M)
     assert "--require-hashes -r requirements.lock" in d and "USER 10001:5060" in d
     assert 'ENTRYPOINT ["aivoicemail"]' in d
 

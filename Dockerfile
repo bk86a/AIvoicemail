@@ -1,7 +1,9 @@
 # aivoicemail-worker: the worker service and the aivoicemail CLI (also used by the "tools" service).
-FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+FROM python:3.12-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client sip-tester \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-client sip-tester libcap2-bin \
+ && setcap cap_net_raw+ep /usr/bin/sipp \
+ && apt-get purge -y --auto-remove libcap2-bin \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd -g 5060 aivm \
  && useradd -u 10001 -g 5060 -M -d /var/lib/aivoicemail -s /usr/sbin/nologin aivm \

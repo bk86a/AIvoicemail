@@ -34,12 +34,10 @@ def speech_lead(line, digit, d) -> float:
     return timings.WAIT_S + d[f"{line.id}-notice-{line.menu[0]}"] + timings.BEEP_S
 
 
-def sipp_command(line, scenario, *, target, digit_csv=None) -> list[str]:
-    cmd = ["sipp", target, "-sf", str(scenario), "-s", line.did]
-    if digit_csv is not None:
-        cmd += ["-inf", str(digit_csv)]
-    return cmd + ["-i", "127.0.0.1", "-p", "15070", "-mi", "127.0.0.1", "-min_rtp_port", "26000",
-                  "-max_rtp_port", "26100", "-m", "1", "-timeout", "200s", "-timeout_error", "-nostdin"]
+def sipp_command(line, scenario, *, target) -> list[str]:
+    return ["sipp", target, "-sf", str(scenario), "-s", line.did, "-i", "127.0.0.1", "-p", "15070",
+            "-mi", "127.0.0.1", "-min_rtp_port", "26000", "-max_rtp_port", "26100", "-m", "1",
+            "-timeout", "200s", "-timeout_error", "-nostdin"]
 
 
 def _ts(value) -> float:
@@ -87,15 +85,14 @@ def run(cfg, *, line_id=None, digit=None, target=None, wav=None, fake_providers=
         work = Path(tmp)
         pcap.write_media(work, digits=digit or "", wav=wav, lead=speech_lead(line, digit, d) if wav else 0.0)
         scenario = work / "call.xml"
-        scenario.write_text(timings.render_call(mode, pause_ms, str(work)), encoding="utf-8")
-        csv = None
+        text = timings.render_call(mode, pause_ms, str(work))
         if digit:
-            csv = work / "field.csv"
-            csv.write_text(f"SEQUENTIAL\n{digit};\n", encoding="utf-8")
+            text = text.replace("[field0]", digit)
+        scenario.write_text(text, encoding="utf-8")
         out(f"test-call: line {line.id} ({line.did}) via {target}, "
             f"{'menu key ' + digit if digit else 'no key'}, about {pause_ms // 1000 + 4} s")
         started = clock()
-        r = runner(sipp_command(line, scenario, target=target, digit_csv=csv), capture_output=True, text=True)
+        r = runner(sipp_command(line, scenario, target=target), capture_output=True, text=True)
     if r.returncode != 0:
         out(f"ERROR: SIPp failed (exit {r.returncode}): {(r.stderr or '').strip()[-500:]}")
         return 1
