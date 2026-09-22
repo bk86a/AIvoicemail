@@ -40,7 +40,31 @@ def _add_worker(sub) -> None:
     p.set_defaults(func=cmd_worker)
 
 
-COMMANDS = [_add_worker]
+def cmd_render_prompts(args) -> int:
+    import dataclasses
+    from .tts import RenderError, render_all
+    cfg, env, _ = load_all(args)
+    if args.engine:
+        cfg = dataclasses.replace(cfg, tts=dataclasses.replace(cfg.tts, engine=args.engine))
+    out = Path(args.out) if args.out else cfg.paths.generated_dir
+    try:
+        written = render_all(cfg, env, out, only=args.only, log=print)
+    except RenderError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    print(f"render-prompts: {len(written)} prompt(s) in {out / 'sounds' / 'vm'}")
+    return 0
+
+
+def _add_render_prompts(sub) -> None:
+    p = sub.add_parser("render-prompts", help="render every prompt to generated/sounds (TTS or overrides/)")
+    p.add_argument("--out", help="output directory (default: [paths].generated_dir)")
+    p.add_argument("--only", nargs="*", help="prompt names to render")
+    p.add_argument("--engine", choices=["piper", "azure", "placeholder"], help="override [tts].engine")
+    p.set_defaults(func=cmd_render_prompts)
+
+
+COMMANDS = [_add_worker, _add_render_prompts]
 
 
 def build_parser() -> argparse.ArgumentParser:
