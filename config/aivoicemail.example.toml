@@ -1,0 +1,99 @@
+# aivoicemail configuration. Copy to config/aivoicemail.toml and edit.
+# Secrets never go here: *_env keys name environment variables (set them in .env).
+# Relative paths resolve against the install root (the directory above config/).
+
+[company]
+name = "ACME BV"
+privacy_url_default = "acme.example/privacy"
+
+[trunk]                       # IP-authenticated only in v0.1
+provider = "didww"            # label only; the ranges are what counts
+signalling_ranges = ["46.19.208.0/21", "185.238.172.0/22"]
+media_ranges      = ["46.19.208.0/21", "185.238.172.0/22"]
+public_ip = "203.0.113.10"    # NAT: external signalling/media address
+local_net = "10.0.0.0/24"     # optional
+# bind = "0.0.0.0:5060"       # SIP UDP listen address
+# media_address = ""          # optional: bind RTP to this local address
+# allow_local_test = true     # identify 127.0.0.1 as the trunk so `aivoicemail test-call` works
+
+[[line]]
+id = "be"
+did = "3220000001"            # E.164 without +
+mailbox = "info@acme.example"
+email_language = "en"
+menu = ["nl", "fr", "en"]     # one language = no menu
+default_language = "auto"     # no key pressed: multilingual short notice, language auto-detected
+privacy_url = "acme.example/privacy"   # optional, per line; else company default
+
+[[line]]
+id = "pl"
+did = "48320000001"
+mailbox = "kontakt@acme.example"
+email_language = "pl"
+menu = ["pl"]
+
+[recording]
+max_seconds = 180
+silence_seconds = 5
+min_speech_seconds = 2
+
+[stt]
+chain = ["whisper_local", "remote"]  # "remote" optional
+whisper_model = "large-v3"           # small / medium for small hosts
+# whisper_threads = 4
+remote = { base_url = "https://api.mistral.ai/v1", model = "voxtral-mini-latest", key_env = "STT_API_KEY" }
+
+[llm]
+chain = ["primary"]                  # add "secondary" for a fallback
+primary = { base_url = "https://api.mistral.ai/v1", model = "mistral-small-latest", key_env = "LLM_API_KEY", structured = "json_schema" }
+# secondary = { kind = "anthropic", model = "<model id>", key_env = "ANTHROPIC_API_KEY" }   # needs the anthropic extra
+# Azure OpenAI: base_url = "https://<resource>.openai.azure.com/openai/v1", auth = "api-key"
+# Ollama:       base_url = "http://127.0.0.1:11434/v1", no key_env, structured = "json_object"
+
+[mail]
+smtp_host = "smtp.example"
+smtp_port = 587
+# smtp_security = "starttls"         # "tls" for port 465, "none" only for a local relay
+smtp_user_env = "SMTP_USER"
+smtp_password_env = "SMTP_PASSWORD"
+from = "voicemail@acme.example"
+from_name = "ACME Voicemail"
+alert_to = "admin@acme.example"
+
+[tts]
+engine = "piper"                     # or "azure"
+voices = { nl = "nl_BE-nathalie-medium", fr = "fr_FR-siwis-medium", en = "en_GB-alba-medium", pl = "pl_PL-gosia-medium" }
+pronunciation = { "ACME" = { nl = "ˈaː.kmə", en = "ˈæk.mi" } }
+# sentence_ms = 300
+# azure = { region = "westeurope", key_env = "AZURE_SPEECH_KEY" }   # engine = "azure"; voices then e.g. nl = "nl-BE-DenaNeural"
+
+[retention]
+call_log_days = 90
+cdr = false                          # optional Asterisk CDR CSV, same retention when on
+
+# [worker]
+# poll_seconds = 30
+# stale_minutes = 60
+# unreachable_minutes = 15
+# max_failures = 5
+
+# [spool]
+# backend = "local"                  # "ssh" in split mode
+# path = "/srv/aivoicemail/spool"
+# ssh_target = "aivm-spool@192.0.2.20"
+# ssh_key = "secrets/spool_key"
+# known_hosts = "secrets/known_hosts"
+
+# [firewall]                         # used by `aivoicemail generate` for generated/nftables/aivoicemail.nft
+# allow_tcp = [22]
+# allow_udp = []
+
+# [paths]
+# data_dir = "/var/lib/aivoicemail"
+# work_dir = "/run/aivoicemail"
+# prompts_dir = "prompts"
+# overrides_dir = "overrides"
+# generated_dir = "generated"
+
+# [prompt_text.en]                   # override any template text; `check` still enforces transparency
+# thanks = "Thank you, goodbye."
