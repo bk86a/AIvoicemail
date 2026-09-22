@@ -1,4 +1,6 @@
+import os
 import re
+import subprocess
 
 from aivoicemail import generate
 from conftest import ROOT
@@ -8,6 +10,26 @@ DEPLOY = ROOT / "deploy"
 
 def text(path):
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+def aivm(tmp_path, *args):
+    """Run ./aivm with a fake `docker` on PATH that just records its argv, to check routing."""
+    calls = tmp_path / "docker_calls"
+    fake_docker = tmp_path / "docker"
+    fake_docker.write_text(f'#!/bin/sh\necho "$@" >> "{calls}"\n', encoding="utf-8")
+    fake_docker.chmod(0o755)
+    env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}")
+    subprocess.run([str(ROOT / "aivm"), *args], cwd=ROOT, env=env, check=True, capture_output=True)
+    return calls.read_text(encoding="utf-8") if calls.exists() else ""
+
+
+def test_aivm_routes_test_call_to_the_testcall_service(tmp_path):
+    assert "run --rm testcall --line pl" in aivm(tmp_path, "test-call", "--line", "pl")
+
+
+def test_aivm_routes_other_commands_to_tools(tmp_path):
+    assert "run --rm tools check" in aivm(tmp_path, "check")
+    assert "testcall" not in aivm(tmp_path, "render-prompts")
 
 
 def test_nftables_example_is_the_generated_ruleset(example_cfg):
@@ -35,22 +57,25 @@ def test_worker_services_share_the_hardening_anchor():
     for line in ("read_only: true", "cap_drop: [ALL]", 'security_opt: ["no-new-privileges:true"]',
                  'user: "10001:5060"', 'max-size: "10m"'):
         assert line in anchor, line
-    assert c.count("<<: *hardening") == 2
+    assert c.count("<<: *hardening") == 3
     assert "privileged" not in c
+    assert "pid: host" not in c
     assert "/run/aivoicemail:uid=10001,gid=5060,mode=0700" in c
 
 
-def test_only_tools_gets_net_raw_for_sipp():
+def test_only_testcall_gets_net_raw_for_sipp():
     c = text("deploy/compose.worker.yaml")
-    worker_block, tools_block = c.split("  worker:")[1].split("  tools:")
-    assert "cap_add" not in worker_block and "security_opt" not in worker_block and "pid: host" not in worker_block
-    assert "cap_add: [NET_RAW]" in tools_block
-    # no-new-privileges (from the shared anchor) is explicitly cleared for tools only: it would block
-    # the CAP_NET_RAW file capability on /usr/bin/sipp from taking effect even with cap_add above
-    assert "security_opt: []" in tools_block
-    assert '"no-new-privileges:true"' in c.split("services:")[0]  # worker still gets it via the anchor
-    # sipp's Call-ID/branch come from its own PID; a fresh container gives it the same PID every run
-    assert "pid: host" in tools_block
+    worker_block, rest = c.split("  worker:")[1].split("  tools:")
+    tools_block, testcall_block = rest.split("  testcall:")
+    assert "cap_add" not in worker_block and "security_opt" not in worker_block
+    assert "cap_add" not in tools_block and "security_opt" not in tools_block
+    assert "cap_add: [NET_RAW]" in testcall_block
+    # no-new-privileges (from the shared anchor) is explicitly cleared for testcall only: it would
+    # block the CAP_NET_RAW file capability on /usr/bin/sipp from taking effect even with cap_add above
+    assert "security_opt: []" in testcall_block
+    assert 'entrypoint: ["aivoicemail", "test-call"]' in testcall_block
+    # worker and tools still get no-new-privileges via the anchor (neither block overrides it)
+    assert '"no-new-privileges:true"' in c.split("services:")[0]
 
 
 def test_dockerfile_grants_sipp_raw_socket_capability():

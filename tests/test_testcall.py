@@ -56,7 +56,21 @@ def test_menu_call_uses_inband_digit_and_waits_for_outcome(cfg):
     cmd, scenario = seen
     assert cmd[:2] == ["sipp", "127.0.0.1:5060"] and cmd[cmd.index("-s") + 1] == "3220000001" and "-inf" not in cmd
     assert "inband_1.pcap" in scenario and "[field0]" not in scenario and "telephone-event" not in scenario
+    assert "[call_id]" in scenario and "[branch]" in scenario  # SIPp's own keywords, untouched
+    assert "-cid_str" in cmd
     assert out[-1] == f"test-call: outcome=message message_id=<m@acme.example> item={ID}"
+
+
+def test_two_consecutive_calls_get_different_call_id_tokens(cfg):
+    rendered(cfg)
+    seen1, seen2, clock = [], [], Clock()
+    assert testcall.run(cfg, runner=worker_runner(cfg, seen=seen1), clock=clock, sleep=clock.sleep,
+                        out=lambda *a: None) == 0
+    assert testcall.run(cfg, runner=worker_runner(cfg, seen=seen2), clock=clock, sleep=clock.sleep,
+                        out=lambda *a: None) == 0
+    cid_str = lambda cmd: cmd[cmd.index("-cid_str") + 1]
+    assert cid_str(seen1[0]) != cid_str(seen2[0])
+    assert cid_str(seen1[0]).startswith("%u-") and cid_str(seen1[0]).endswith("@%s")
 
 
 def test_menu_call_digit_2_substitutes_correct_pcap(cfg):

@@ -1,5 +1,7 @@
 # Processing host: the worker service, plus the "tools" profile that runs the aivoicemail CLI
-# (./aivm <command>). Single host: included by deploy/compose.yaml. Split mode: run this file alone.
+# (./aivm <command>). "testcall" is a separate service (same profile/image) for `test-call` alone,
+# since it needs a raw socket that `tools` and `worker` must not have.
+# Single host: included by deploy/compose.yaml. Split mode: run this file alone.
 x-hardening: &hardening
   read_only: true
   cap_drop: [ALL]
@@ -33,15 +35,29 @@ services:
     image: aivoicemail-worker:0.1.0
     profiles: [tools]
     network_mode: host
-    pid: host             # sipp (test-call) derives its Call-ID/branch from its own PID; as a fresh
-                         # container's PID 2 every run, a second run would reuse the first and PJSIP
-                         # would answer its BYE from the still-cached first transaction (same reason
-                         # tests/sipp/run_harness.sh runs SIPp with --pid host)
-    cap_add: [NET_RAW]   # sipp (test-call) needs a raw socket for its RTP port range checks; file
-                         # capability set on /usr/bin/sipp at build time, nothing else gains it
+    env_file: [../.env]
+    volumes:
+      - ../config:/opt/aivoicemail/config:ro
+      - ../overrides:/opt/aivoicemail/overrides:ro
+      - ../generated:/opt/aivoicemail/generated
+      - data:/var/lib/aivoicemail
+    tmpfs:
+      - /tmp:uid=10001,gid=5060,mode=0700
+
+  testcall:
+    <<: *hardening
+    build: {context: .., dockerfile: Dockerfile}
+    image: aivoicemail-worker:0.1.0
+    profiles: [tools]
+    network_mode: host
+    entrypoint: ["aivoicemail", "test-call"]
+    cap_add: [NET_RAW]   # sipp's RTP port range checks (-min_rtp_port/-max_rtp_port) open a raw
+                         # socket; a file capability set on /usr/bin/sipp at build time is the only
+                         # thing in the image that can use it - "tools" and "worker" never get this
     security_opt: []     # no-new-privileges would block that file capability from taking effect even
-                         # with cap_add above; safe here since the image root filesystem is read-only,
-                         # so no elevated binary can be added to it at runtime
+                         # with cap_add above; only this service (never internet-facing, and its root
+                         # filesystem stays read-only so no elevated binary can be added at runtime)
+                         # clears it - "tools" and "worker" keep the full anchor
     env_file: [../.env]
     volumes:
       - ../config:/opt/aivoicemail/config:ro

@@ -1,8 +1,10 @@
 """aivoicemail test-call: a local SIPp call into the running Asterisk, then wait for the worker's outcome.
 
-Runs where Asterisk runs (single host, "tools" service with host networking). The call comes from
-127.0.0.1, which the generated trunk identifies when [trunk].allow_local_test = true (default).
-Menu keys are sent as in-band DTMF, the path carriers without telephone-event use."""
+Runs where Asterisk runs (single host, "testcall" service with host networking - the only service
+that needs a raw socket for SIPp's RTP port range checks). The call comes from 127.0.0.1, which the
+generated trunk identifies when [trunk].allow_local_test = true (default). Menu keys are sent as
+in-band DTMF, the path carriers without telephone-event use."""
+import secrets
 import subprocess
 import tempfile
 import time
@@ -34,10 +36,18 @@ def speech_lead(line, digit, d) -> float:
     return timings.WAIT_S + d[f"{line.id}-notice-{line.menu[0]}"] + timings.BEEP_S
 
 
-def sipp_command(line, scenario, *, target) -> list[str]:
-    return ["sipp", target, "-sf", str(scenario), "-s", line.did, "-i", "127.0.0.1", "-p", "15070",
-            "-mi", "127.0.0.1", "-min_rtp_port", "26000", "-max_rtp_port", "26100", "-m", "1",
-            "-timeout", "200s", "-timeout_error", "-nostdin"]
+def sipp_command(line, scenario, *, target, cid_token) -> list[str]:
+    # -cid_str overrides SIPp's own Call-ID format (default "%u-%p@%s", i.e. call_number-PID@ip): a
+    # fresh container gives the sipp subprocess the same low PID every run, so without this a second
+    # test-call could collide with an already-cached dialog from an earlier run. %u/%s are SIPp's own
+    # placeholders (call_number, ip), kept so this stays informative; <cid_token> is what makes it
+    # unique. Textually replacing the scenario's own [call_id]/[branch] keywords instead does not work:
+    # SIPp's response matching is tied to its internal call-id bookkeeping, not to the literal scenario
+    # text, so a hardcoded Call-ID/branch is never recognised as "this call's id" and every response is
+    # treated as unmatched (verified: the call then never leaves retransmitting the INVITE).
+    return ["sipp", target, "-sf", str(scenario), "-s", line.did, "-cid_str", f"%u-{cid_token}@%s",
+            "-i", "127.0.0.1", "-p", "15070", "-mi", "127.0.0.1", "-min_rtp_port", "26000",
+            "-max_rtp_port", "26100", "-m", "1", "-timeout", "200s", "-timeout_error", "-nostdin"]
 
 
 def _ts(value) -> float:
@@ -92,7 +102,8 @@ def run(cfg, *, line_id=None, digit=None, target=None, wav=None, fake_providers=
         out(f"test-call: line {line.id} ({line.did}) via {target}, "
             f"{'menu key ' + digit if digit else 'no key'}, about {pause_ms // 1000 + 4} s")
         started = clock()
-        r = runner(sipp_command(line, scenario, target=target), capture_output=True, text=True)
+        cid_token = secrets.token_hex(8)
+        r = runner(sipp_command(line, scenario, target=target, cid_token=cid_token), capture_output=True, text=True)
     if r.returncode != 0:
         out(f"ERROR: SIPp failed (exit {r.returncode}): {(r.stderr or '').strip()[-500:]}")
         return 1
