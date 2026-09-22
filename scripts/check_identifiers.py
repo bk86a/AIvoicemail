@@ -7,7 +7,8 @@ strings with separators removed. Also rejected: public IPv4 literals outside doc
 private and carrier ranges; e-mail addresses outside example domains; home/nas host aliases.
 
 Usage: check_identifiers.py            scan tracked files of the work tree
-       check_identifiers.py --history  also scan every blob and commit message in git history
+       check_identifiers.py --history  also scan every blob, commit message, author/committer
+                                       identity and tag message in git history
 """
 import hashlib
 import ipaddress
@@ -73,7 +74,8 @@ def violations(text, blocked):
         if re.fullmatch(r"[\d.]+", d):
             continue  # user@IP in SIP URIs and SSH targets; the IP rule above covers it
         if not ALLOWED_EMAIL_DOMAIN.fullmatch(d):
-            out.append(f"e-mail address outside example domains (@{d})")
+            shown = "blocked domain" if any(_sha(w) in blocked for w in WORD.findall(d)) else d
+            out.append(f"e-mail address outside example domains (@{shown})")
     for pattern in HOST_PATTERNS:
         if pattern.search(low):
             out.append(f"host alias pattern {pattern.pattern!r}")
@@ -101,7 +103,10 @@ def scan_worktree(root, blocked=frozenset()):
 def scan_history(root, blocked=frozenset()):
     root = Path(root)
     git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, check=True).stdout
-    found = [f"commit messages: {v}" for v in violations(git("log", "--all", "--format=%B").decode("utf-8", "replace"), blocked)]
+    text = lambda *a: git(*a).decode("utf-8", "replace")
+    found = [f"commit messages: {v}" for v in violations(text("log", "--all", "--format=%B"), blocked)]
+    found += [f"commit metadata: {v}" for v in violations(text("log", "--all", "--format=%an%n%ae%n%cn%n%ce"), blocked)]
+    found += [f"tags: {v}" for v in violations(text("for-each-ref", "--format=%(contents)", "refs/tags"), blocked)]
     for line in git("rev-list", "--all", "--objects").decode().splitlines():
         sha = line.split(" ", 1)[0]
         if git("cat-file", "-t", sha).strip() != b"blob":

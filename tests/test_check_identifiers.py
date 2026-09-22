@@ -80,3 +80,48 @@ def test_gitignore_excludes_blocklist_file():
 
 def test_repository_worktree_is_clean():
     assert ci.scan_worktree(ROOT) == []
+
+
+def _git(repo, *args, env=None):
+    import os
+    import subprocess
+    full_env = {**os.environ, **(env or {})}
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=full_env)
+
+
+def _repo_with_commit(tmp_path, author_email, committer_email, tag_message=None):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f.txt").write_text("clean\n")
+    _git(repo, "add", "f.txt")
+    env = {"GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": author_email,
+           "GIT_COMMITTER_NAME": "c", "GIT_COMMITTER_EMAIL": committer_email}
+    _git(repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "clean", env=env)
+    if tag_message:
+        _git(repo, "-c", "tag.gpgsign=false", "tag", "-a", "v0", "-m", tag_message, env=env)
+    return repo
+
+
+def test_history_scan_flags_blocked_author_email_domain(tmp_path):
+    repo = _repo_with_commit(tmp_path, "someone" + "@" + "zzforbiddenzz.test", "41694587+x@users.noreply.github.com")
+    found = ci.scan_history(repo, blocked={h("zzforbiddenzz")})
+    assert any(v.startswith("commit metadata:") for v in found)
+    assert "zzforbiddenzz" not in " ".join(found)
+
+
+def test_history_scan_flags_committer_email_outside_example_domains(tmp_path):
+    repo = _repo_with_commit(tmp_path, "41694587+x@users.noreply.github.com", "someone" + "@" + "company.test")
+    assert any("commit metadata" in v and "e-mail" in v for v in ci.scan_history(repo))
+
+
+def test_history_scan_allows_noreply_identities(tmp_path):
+    repo = _repo_with_commit(tmp_path, "41694587+x@users.noreply.github.com", "noreply@anthropic.com")
+    assert ci.scan_history(repo, blocked={h("zzforbiddenzz")}) == []
+
+
+def test_history_scan_checks_tag_contents(tmp_path):
+    repo = _repo_with_commit(tmp_path, "41694587+x@users.noreply.github.com",
+                             "41694587+x@users.noreply.github.com", tag_message="release zzforbiddenzz")
+    found = ci.scan_history(repo, blocked={h("zzforbiddenzz")})
+    assert any(v.startswith("tags:") for v in found)
